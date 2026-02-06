@@ -1,10 +1,13 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-def get_refuel_kb() -> InlineKeyboardMarkup:
+def get_refuel_kb(statuses: dict = None) -> InlineKeyboardMarkup:
+    s1 = statuses.get("GEN-1 (003)", "🔴") if statuses else "🔴"
+    s2 = statuses.get("GEN-2 (036) WILSON", "🔴") if statuses else "🔴"
+    
     buttons = [
         [
-            InlineKeyboardButton(text="GEN-1 (003)", callback_data="refuel_select_GEN-1 (003)"),
-            InlineKeyboardButton(text="GEN-2 (036) WILSON", callback_data="refuel_select_GEN-2 (036) WILSON")
+            InlineKeyboardButton(text=f"{s1} GEN-1 (003)", callback_data="refuel_select_GEN-1 (003)"),
+            InlineKeyboardButton(text=f"{s2} GEN-2 (036) WILSON", callback_data="refuel_select_GEN-2 (036) WILSON")
         ],
         [InlineKeyboardButton(text="❌ Закрити", callback_data="refuel_close")]
     ]

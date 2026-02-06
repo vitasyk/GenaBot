@@ -146,14 +146,12 @@ class GeneratorService:
         await self.logs.log_action(user_id, "UPDATE_SPECS", f"Updated {name}: Cap={capacity}L, Rate={rate}L/h")
 
     async def rename_generators_init(self):
-        # One-time rename if needed
-        # We handle old names too just in case they were already "GEN-003" etc
+        # Migration to standardized names: GEN-1 (003) and GEN-2 (036) WILSON
         await self.repo.rename_generator("GEN-1", "GEN-1 (003)")
         await self.repo.rename_generator("GEN-003", "GEN-1 (003)")
-        # Rename GEN-2 to OLD name first if needed, then to NEW name
-        await self.repo.rename_generator("GEN-2", "GEN-2 (038)") 
-        await self.repo.rename_generator("GEN-038", "GEN-2 (038)")
-        # The new rename
+        
+        await self.repo.rename_generator("GEN-2", "GEN-2 (036) WILSON") 
+        await self.repo.rename_generator("GEN-038", "GEN-2 (036) WILSON")
         await self.repo.rename_generator("GEN-2 (038)", "GEN-2 (036) WILSON")
 
     async def get_remaining_runtime(self, gen_name: str) -> float:

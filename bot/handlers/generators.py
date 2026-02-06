@@ -67,7 +67,15 @@ async def _get_status_panel(generator_service: GeneratorService, with_keyboard: 
         text += "\n"
     text += "➖➖➖➖➖➖➖➖➖➖"
     
-    kb = get_generator_control_kb(exclude_correction=exclude_correction) if with_keyboard else None
+    # Map statuses to emojis for the keyboard
+    status_map = {}
+    for g in gens:
+        icon = "🔴"
+        if g.status == GenStatus.running: icon = "🟢"
+        elif g.status == GenStatus.standby: icon = "🟡"
+        status_map[g.name] = icon
+
+    kb = get_generator_control_kb(statuses=status_map, exclude_correction=exclude_correction) if with_keyboard else None
     
     if kb:
         # Add Notification Toggle Button
@@ -105,13 +113,22 @@ async def back_to_status_callback(callback: types.CallbackQuery, generator_servi
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
 @router.message(F.text == "🔄 Керування")
-async def switch_gen_menu(message: types.Message, user_repo: UserRepository):
+async def switch_gen_menu(message: types.Message, user_repo: UserRepository, generator_service: GeneratorService):
     user = await user_repo.get_by_id(message.from_user.id)
     if not user or user.role != UserRole.admin:
         await message.answer("⛔ Ця функція доступна тільки адміністраторам.")
         return
 
-    await message.answer("Оберіть дію:", reply_markup=get_generator_control_kb(), parse_mode="HTML")
+    # Fetch statuses for keyboard
+    gens = await generator_service.get_status()
+    status_map = {}
+    for g in gens:
+        icon = "🔴"
+        if g.status == GenStatus.running: icon = "🟢"
+        elif g.status == GenStatus.standby: icon = "🟡"
+        status_map[g.name] = icon
+
+    await message.answer("Оберіть дію:", reply_markup=get_generator_control_kb(statuses=status_map), parse_mode="HTML")
 
 @router.callback_query(F.data.startswith("start_gen_"))
 async def start_generator_callback(callback: types.CallbackQuery, generator_service: GeneratorService):

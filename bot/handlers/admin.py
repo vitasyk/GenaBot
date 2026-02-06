@@ -89,6 +89,7 @@ async def admin_sessions_list(callback: types.CallbackQuery, bot: Bot):
         InlineKeyboardButton(text="➕ Створити вручну", callback_data="admin_create_session_manual"),
         InlineKeyboardButton(text="🗑️ Видалити скасовані", callback_data="admin_delete_cancelled_sessions")
     )
+    builder.row(InlineKeyboardButton(text="🗑️ Видалити ВСІ сесії", callback_data="admin_confirm_delete_all_sessions"))
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel_back"))
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
@@ -403,3 +404,30 @@ async def do_reset_logs(callback: types.CallbackQuery, log_repo: LogRepository):
 async def admin_close_callback(callback: types.CallbackQuery):
     await callback.message.delete()
     await callback.answer()
+@router.callback_query(F.data == "admin_confirm_delete_all_sessions")
+async def admin_confirm_delete_all_sessions(callback: types.CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="✅ Так, видалити ВСЕ", callback_data="admin_perform_delete_all_sessions"),
+        InlineKeyboardButton(text="🔙 Скасувати", callback_data="admin_sessions")
+    )
+    
+    await callback.message.edit_text(
+        "⚠️ <b>УВАГА: ВИДАЛЕННЯ ВСІХ СЕСІЙ</b>\n\n"
+        "Бот видалить <b>ВСЮ</b> історію заправок з бази даних. Ця дія незворотна.\n\n"
+        "Ви справді впевнені?", 
+        reply_markup=builder.as_markup(), 
+        parse_mode="HTML"
+    )
+
+@router.callback_query(F.data == "admin_perform_delete_all_sessions")
+async def admin_perform_delete_all_sessions(callback: types.CallbackQuery, bot: Bot):
+    from bot.database.main import session_maker
+    from bot.database.repositories.session import SessionRepository
+    
+    async with session_maker() as session:
+        repo = SessionRepository(session)
+        count = await repo.delete_all()
+    
+    await callback.answer(f"🗑️ Видалено сесій: {count}", show_alert=True)
+    await admin_sessions_list(callback, bot)

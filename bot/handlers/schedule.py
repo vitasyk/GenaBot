@@ -348,7 +348,7 @@ async def process_periods_input(message: Message, state: FSMContext, schedule_re
     await message.answer(
         f"📋 <b>Підтвердження</b>\n\n"
         f"📅 Дата: <b>{target_date.strftime('%d.%m.%Y')}</b>\n"
-        f"🔴 Черга: <b>1.1</b>\n\n"
+        f"📋 Черга: <b>1.1</b>\n\n"
         f"⏰ Періоди відключень:\n{periods_text}\n\n"
         f"Всього блоків: {len(periods)}",
         reply_markup=get_confirm_kb(),

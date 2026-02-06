@@ -12,6 +12,7 @@ class SessionStates(StatesGroup):
     selecting_generators = State()
     waiting_for_generator = State()
     waiting_for_liters = State()
+    waiting_for_antigel = State()
     waiting_for_notes = State()
 
 class AdminStates(StatesGroup):

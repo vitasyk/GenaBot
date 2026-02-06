@@ -2,10 +2,16 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 from datetime import datetime
+from aiogram import Bot
 
 from bot.states import SessionStates
 from bot.database.main import session_maker
 from bot.database.repositories.session import SessionRepository
+from bot.database.repositories.user import UserRepository
+from bot.services.notifier import NotifierService
+from bot.services.generator import GeneratorService
+from bot.database.repositories.generator import GeneratorRepository
+from bot.database.repositories.logs import LogRepository
 from bot.database.models import SessionStatus
 from bot.keyboards.session_kb import (
     get_in_progress_kb, 
@@ -41,24 +47,38 @@ async def start_session_handler(callback: CallbackQuery):
                     f"Дедлайн (світло): {deadline_str}\n\n"
                     f"Натисніть 'Завершити', коли заправите генератор.")
         
-        await callback.message.edit_text(msg_text, reply_markup=get_in_progress_kb(session_id))
+        await callback.message.edit_text(msg_text, reply_markup=get_in_progress_kb(session_id), parse_mode="HTML")
         await callback.answer("Сесію розпочато!")
 
 @router.callback_query(F.data.startswith("session_complete:"))
-async def complete_session_start(callback: CallbackQuery, state: FSMContext):
+async def complete_session_start(callback: CallbackQuery, state: FSMContext, generator_service: GeneratorService):
     session_id = int(callback.data.split(":")[1])
     await state.update_data(session_id=session_id, selected_gens=[])
+    
+    statuses = await _get_gen_statuses(generator_service)
     
     await callback.message.edit_text(
         "⚡️ <b>Завершення сесії</b>\n\n"
         "Оберіть генератори які були заправлені:",
-        reply_markup=get_gen_selection_kb([])
+        reply_markup=get_gen_selection_kb([], statuses=statuses),
+        parse_mode="HTML"
     )
     await state.set_state(SessionStates.selecting_generators)
     await callback.answer()
 
+async def _get_gen_statuses(generator_service: GeneratorService) -> dict:
+    gens = await generator_service.get_status()
+    from bot.database.models import GenStatus
+    status_map = {}
+    for g in gens:
+        icon = "🔴"
+        if g.status == GenStatus.running: icon = "🟢"
+        elif g.status == GenStatus.standby: icon = "🟡"
+        status_map[g.name] = icon
+    return status_map
+
 @router.callback_query(SessionStates.selecting_generators, F.data.startswith("toggle_gen:"))
-async def toggle_generator(callback: CallbackQuery, state: FSMContext):
+async def toggle_generator(callback: CallbackQuery, state: FSMContext, generator_service: GeneratorService):
     gen_name = callback.data.split(":")[1]
     data = await state.get_data()
     selected = data.get("selected_gens", [])
@@ -71,14 +91,16 @@ async def toggle_generator(callback: CallbackQuery, state: FSMContext):
     
     await state.update_data(selected_gens=selected)
     
+    statuses = await _get_gen_statuses(generator_service)
+    
     # Update keyboard
     await callback.message.edit_reply_markup(
-        reply_markup=get_gen_selection_kb(selected)
+        reply_markup=get_gen_selection_kb(selected, statuses=statuses)
     )
     await callback.answer()
 
 @router.callback_query(SessionStates.selecting_generators, F.data == "gen_confirm")
-async def confirm_generators(callback: CallbackQuery, state: FSMContext):
+async def confirm_generators(callback: CallbackQuery, state: FSMContext, generator_service: GeneratorService):
     data = await state.get_data()
     selected_gens = data.get("selected_gens", [])
     
@@ -93,11 +115,15 @@ async def confirm_generators(callback: CallbackQuery, state: FSMContext):
     )
     
     first_gen = selected_gens[0]
+    statuses = await _get_gen_statuses(generator_service)
+    gen_emoji = statuses.get(first_gen, "🔴")
+    
     await callback.message.edit_text(
-        f"⛽️ <b>{first_gen}</b>\n\n"
+        f"⛽️ {gen_emoji} <b>{first_gen}</b>\n\n"
         f"Скільки літрів залили до {first_gen}?\n"
         "Введіть число (наприклад: 20.5).",
-        reply_markup=None
+        reply_markup=None,
+        parse_mode="HTML"
     )
     await state.set_state(SessionStates.waiting_for_liters)
     await callback.answer()
@@ -109,12 +135,13 @@ async def generator_chosen(callback: CallbackQuery, state: FSMContext):
     
     await callback.message.edit_text("⛽️ <b>Скільки літрів палива залили?</b>\n\n"
                                      "Введіть число (наприклад: 20.5).", 
-                                     reply_markup=None)
+                                     reply_markup=None,
+                                     parse_mode="HTML")
     await state.set_state(SessionStates.waiting_for_liters)
     await callback.answer()
 
 @router.message(SessionStates.waiting_for_liters)
-async def liters_input(message: Message, state: FSMContext):
+async def liters_input(message: Message, state: FSMContext, generator_service: GeneratorService):
     try:
         liters = float(message.text.strip().replace(",", "."))
         data = await state.get_data()
@@ -141,45 +168,72 @@ async def liters_input(message: Message, state: FSMContext):
                 )
                 
                 next_gen = selected_gens[next_index]
+                statuses = await _get_gen_statuses(generator_service)
+                gen_emoji = statuses.get(next_gen, "🔴")
+                
                 await message.answer(
-                    f"⛽️ <b>{next_gen}</b>\n\n"
+                    f"⛽️ {gen_emoji} <b>{next_gen}</b>\n\n"
                     f"Скільки літрів залили до {next_gen}?\n"
-                    "Введіть число (наприклад: 20.5)."
+                    "Введіть число (наприклад: 20.5).",
+                    parse_mode="HTML"
                 )
             else:
-                # All generators done, ask for notes
+                # All generators done, ask if Anti-Gel was added
                 await state.update_data(gen_fuel_data=gen_fuel_data)
+                from bot.keyboards.session_kb import get_antigel_kb
                 await message.answer(
-                    "📝 <b>Додати нотатки?</b>\n"
-                    "(наприклад: 'залив масло', 'були проблеми')\n\n"
-                    "Натисніть 'Пропустити', якщо немає.",
-                    reply_markup=get_skip_kb()
+                    "💉 <b>Ви додавали антигель (Anti-Gel)?</b>\n"
+                    "Це важливо для моніторингу залишку присадки.",
+                    reply_markup=get_antigel_kb(),
+                    parse_mode="HTML"
                 )
-                await state.set_state(SessionStates.waiting_for_notes)
+                await state.set_state(SessionStates.waiting_for_antigel)
         else:
             # Old single-generator flow (fallback)
             await state.update_data(liters=liters)
             await message.answer(
                 "📝 <b>Додати нотатки?</b>\n(наприклад: 'залив масло', 'були проблеми')\n\n"
                 "Натисніть 'Пропустити', якщо немає.", 
-                reply_markup=get_skip_kb()
+                reply_markup=get_skip_kb(),
+                parse_mode="HTML"
             )
             await state.set_state(SessionStates.waiting_for_notes)
         
     except ValueError:
         await message.answer("⚠️ Будь ласка, введіть коректне число (наприклад 10.5).")
 
-@router.callback_query(SessionStates.waiting_for_notes, F.data == "skip_step")
-@router.message(SessionStates.waiting_for_notes)
-async def finish_session(event: Message | CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    notes = None
+@router.callback_query(SessionStates.waiting_for_antigel, F.data.startswith("antigel:"))
+async def process_antigel(callback: CallbackQuery, state: FSMContext):
+    added = callback.data == "antigel:yes"
+    await state.update_data(antigel_added=added)
     
-    if isinstance(event, Message):
-        notes = event.text
-    elif isinstance(event, CallbackQuery) and event.data == "skip_step":
-        notes = None
-        # Must answer callback if it was callback
+    from bot.keyboards.session_kb import get_skip_kb
+    await callback.message.edit_text(
+        "📝 <b>Додати нотатки?</b>\n"
+        "(наприклад: 'залив масло', 'були проблеми')\n\n"
+        "Якщо немає - натисніть 'Пропустити'.",
+        reply_markup=get_skip_kb(),
+        parse_mode="HTML"
+    )
+    await state.set_state(SessionStates.waiting_for_notes)
+    await callback.answer()
+
+@router.callback_query(SessionStates.waiting_for_notes, F.data == "skip_step")
+async def skip_note_callback(callback: CallbackQuery, state: FSMContext, bot: Bot, generator_service: GeneratorService):
+    await finish_session(callback, state, bot, notes=None, generator_service=generator_service)
+
+@router.message(SessionStates.waiting_for_notes)
+async def process_notes(message: Message, state: FSMContext, bot: Bot, generator_service: GeneratorService):
+    await finish_session(message, state, bot, notes=message.text, generator_service=generator_service)
+
+async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot: Bot, notes: str | None, generator_service: GeneratorService = None):
+    # Note: GeneratorService might need to be passed or fetched if not available via DI in this async def context
+    # Usually it should be passed from the handlers that call finish_session
+    
+    data = await state.get_data()
+    antigel_added = data.get("antigel_added", False)
+    
+    if isinstance(event, CallbackQuery):
         await event.answer()
         
     session_id = data.get("session_id")
@@ -192,7 +246,7 @@ async def finish_session(event: Message | CallbackQuery, state: FSMContext):
         total_liters = sum(gen_fuel_data.values())
         total_cans = total_liters / 20.0
         
-        # Format as "GEN-003: 15л, GEN-038: 10л"
+        # Format as "GEN-1 (003): 15л, GEN-2 (036) WILSON: 10л"
         gen_summary = ", ".join([f"{name}: {liters}л" for name, liters in gen_fuel_data.items()])
         
         async with session_maker() as session:
@@ -208,19 +262,39 @@ async def finish_session(event: Message | CallbackQuery, state: FSMContext):
             )
             
             # Confirmation with breakdown
-            gen_list = "\n".join([f"  • {name}: {liters}л" for name, liters in gen_fuel_data.items()])
+            statuses = await _get_gen_statuses(generator_service)
+            gen_list = "\n".join([f"  • {statuses.get(name, '🔴')} {name}: {liters}л" for name, liters in gen_fuel_data.items()])
+            antigel_text = "✅ Так" if antigel_added else "❌ Ні"
+            
             msg = (
                 f"✅ <b>Сесію #{session_id} завершено!</b>\n\n"
                 f"👤 Воркер: {event.from_user.full_name}\n"
                 f"⚡️ Генератори:\n{gen_list}\n"
                 f"⛽️ Всього: {total_liters}л ({total_cans:.1f} кан)\n"
+                f"💉 Антигель: {antigel_text}\n"
                 f"🕒 Час: {completed_session.end_time.strftime('%H:%M')}"
             )
             
+            if notes:
+                msg += f"\n📝 Нотатки: {notes}"
+
+            # Reset antigel if added
+            if antigel_added:
+                async with session_maker() as session:
+                    gen_repo = GeneratorRepository(session)
+                    # We can use gen_repo directly here to reset
+                    for gen_name in gen_fuel_data.keys():
+                        await gen_repo.reset_antigel_counter(gen_name)
+                    await session.commit()
+
+            # Notify Admins with summary
+            notifier = NotifierService(bot)
+            await notifier.notify_admins(f"📦 <b>Звіт про заправку (Сесія #{session_id})</b>\n\n{msg}")
+
             if isinstance(event, CallbackQuery):
-                await event.message.edit_text(msg)
+                await event.message.edit_text(msg, parse_mode="HTML")
             else:
-                await event.answer(msg)
+                await event.answer(msg, parse_mode="HTML")
     else:
         # Old single-generator flow (fallback)
         gen_choice = data.get("gen_name")
@@ -248,8 +322,8 @@ async def finish_session(event: Message | CallbackQuery, state: FSMContext):
             )
             
             if isinstance(event, CallbackQuery):
-                await event.message.edit_text(msg)
+                await event.message.edit_text(msg, parse_mode="HTML")
             else:
-                await event.answer(msg)
+                await event.answer(msg, parse_mode="HTML")
             
     await state.clear()

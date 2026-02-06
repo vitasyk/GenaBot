@@ -37,7 +37,7 @@ async def check_rotation_needed(bot: Bot):
         
         msg = ""
         if hours_run >= CRITICAL_HOURS:
-            msg = f"🔴 <b>УВАГА: ПОТРІБНА РОТАЦІЯ!</b>\nГенератор {running_gen.name} працює вже {hours_run:.1f} год.\nТерміново перемкніть на інший!"
+            msg = f"⚠️ <b>УВАГА: ПОТРІБНА РОТАЦІЯ!</b>\nГенератор {running_gen.name} працює вже {hours_run:.1f} год.\nТерміново перемкніть на інший!"
         elif hours_run >= WARN_HOURS and hours_run < WARN_HOURS + 0.6: 
             # Check inventory for next gen
             stock = await inv_repo.get_stock()

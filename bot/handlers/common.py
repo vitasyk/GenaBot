@@ -58,7 +58,7 @@ async def sos_menu_callback(callback: types.CallbackQuery):
 @router.callback_query(F.data == "sos_gen_1")
 async def sos_gen_1(callback: types.CallbackQuery):
     text = (
-        "🔧 <b>GEN-1 (003) (Синій корпус)</b>\n\n"
+        "🔧 <b>GEN-1 (003)</b>\n\n"
         "1. Перевірте паливо (бак зліва)\n"
         "2. Переключіть тумблер \"CHOKE\" у положення ON\n"
         "3. Потягніть стартер 3-5 разів різко\n"
@@ -74,7 +74,7 @@ async def sos_gen_1(callback: types.CallbackQuery):
 @router.callback_query(F.data == "sos_gen_2")
 async def sos_gen_2(callback: types.CallbackQuery):
     text = (
-        "🔧 <b>GEN-2 (036) WILSON (Червоний корпус)</b>\n\n"
+        "🔧 <b>GEN-2 (036) WILSON</b>\n\n"
         "1. Переконайтесь що вимикач НЕ на ON\n"
         "2. Натисніть кнопку PRIME 5 разів\n"
         "3. Переключіть вимикач на ON\n"

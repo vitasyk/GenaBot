@@ -77,3 +77,10 @@ class SessionRepository:
         result = await self.session.execute(stmt)
         await self.session.commit()
         return result.rowcount
+
+    async def delete_all(self) -> int:
+        """Delete ALL sessions. Returns count of deleted rows."""
+        stmt = delete(RefuelSession)
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+        return result.rowcount

@@ -1,5 +1,6 @@
 from aiogram import Router, F, types
-from bot.database.models import UserRole
+import logging
+from bot.database.models import UserRole, GenStatus
 from bot.database.repositories.user import UserRepository
 from bot.keyboards.refuel_kb import get_refuel_kb, get_amount_kb
 from bot.keyboards.inventory_kb import get_inventory_kb
@@ -145,7 +146,13 @@ async def process_refuel_confirm(callback: types.CallbackQuery, inventory_servic
              
         text = "✅ <b>Заправка успішна!</b>\n"
         text += "➖➖➖➖➖➖➖➖➖➖\n"
-        text += f"⛽ <b>{gen_name}</b> +{liters}л\n"
+        
+        # Determine current status icon
+        status_icon = "🔴"
+        if gen and gen.status == GenStatus.running: status_icon = "🟢"
+        elif gen and gen.status == GenStatus.standby: status_icon = "🟡"
+        
+        text += f"⛽ {status_icon} <b>{gen_name}</b> +{liters}л\n"
         text += f"📦 Залишок: <b>{new_amount_cans:.2f}</b> каністр"
         text += antigel_warning
         
