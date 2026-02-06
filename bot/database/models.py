@@ -99,6 +99,7 @@ class WorkerShift(Base):
     shift_number: Mapped[int] = mapped_column(Integer)  # 1 or 2
     worker1_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     worker2_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    worker3_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
     start_time: Mapped[str] = mapped_column(String)  # "08:00"
     end_time: Mapped[str] = mapped_column(String)    # "20:00"
     fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -115,6 +116,7 @@ class RefuelSession(Base):
     # Workers on shift
     worker1_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
     worker2_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
+    worker3_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
     
     # Completion Data
     gen_name: Mapped[str] = mapped_column(String, nullable=True)

@@ -8,7 +8,7 @@ class ShiftRepository(BaseRepository[WorkerShift]):
         super().__init__(session, WorkerShift)
     
     async def save_shift(self, shift_date: date, shift_num: int, w1_id: int, w2_id: int, 
-                        start: str, end: str) -> WorkerShift:
+                        start: str, end: str, w3_id: int = None) -> WorkerShift:
         """Save or update a shift"""
         # Check if shift already exists
         stmt = select(WorkerShift).where(
@@ -22,6 +22,7 @@ class ShiftRepository(BaseRepository[WorkerShift]):
             # Update existing
             existing.worker1_id = w1_id
             existing.worker2_id = w2_id
+            existing.worker3_id = w3_id
             existing.start_time = start
             existing.end_time = end
             return existing
@@ -32,6 +33,7 @@ class ShiftRepository(BaseRepository[WorkerShift]):
                 shift_number=shift_num,
                 worker1_id=w1_id,
                 worker2_id=w2_id,
+                worker3_id=w3_id,
                 start_time=start,
                 end_time=end
             )

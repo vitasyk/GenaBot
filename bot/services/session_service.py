@@ -92,11 +92,11 @@ class SessionService:
             if now >= active_session.deadline:
                 # Notify and mark as expired/awaiting completion if still in_progress
                 if active_session.status in [SessionStatus.pending.value, SessionStatus.in_progress.value]:
-                    msg = "⚡ <b>Електроенергія має з'явитися за графіком!</b>\n" \
-                          "Поверніть генератор у режим чергування або зупиніть його."
+                    msg = f"🔔 <b>Час спливає!</b> Сесія {active_session.id} досягає дедлайну о {active_session.deadline.strftime('%H:%M')}. Будь ласка, завершіть заправку."
                     
                     if active_session.worker1_id: await self.notifier.notify_user(active_session.worker1_id, msg)
                     if active_session.worker2_id: await self.notifier.notify_user(active_session.worker2_id, msg)
+                    if active_session.worker3_id: await self.notifier.notify_user(active_session.worker3_id, msg)
                     await self.notifier.notify_admins(f"📢 <b>Час відновлення!</b> Сесія {active_session.id} досягла дедлайну ({active_session.deadline.strftime('%H:%M')}).")
                     
                     # Update status to avoid re-notifying
@@ -114,8 +114,8 @@ class SessionService:
             return None
 
         # 5. Get Workers for the START of the block
-        w1_name, w2_name = "Unknown", "Unknown"
-        worker1_id, worker2_id = None, None
+        w1_name, w2_name, w3_name = "Unknown", "Unknown", "Unknown"
+        worker1_id, worker2_id, worker3_id = None, None, None
         
         try:
             worker_tuples = self.sheets_service.get_workers_for_outage(
@@ -134,27 +134,32 @@ class SessionService:
                 user2 = await self.user_repo.get_by_sheet_name(w2_name)
                 if not user2: user2 = await self.user_repo.get_by_name(w2_name)
                 if user2: worker2_id = user2.id
+            
+            if len(worker_tuples) > 2:
+                w3_name, _ = worker_tuples[2]
+                user3 = await self.user_repo.get_by_sheet_name(w3_name)
+                if not user3: user3 = await self.user_repo.get_by_name(w3_name)
+                if user3: worker3_id = user3.id
                 
-            logging.info(f"Block found: {block_start} to {deadline}. Assigned: {w1_name}, {w2_name}")
+            logging.info(f"Block found: {block_start} to {deadline}. Assigned: {w1_name}, {w2_name}, {w3_name}")
         except Exception as e:
             logging.error(f"Failed to get workers: {e}")
 
         # 5. Create Session
-        # Logic: Session starts NOW if it's already an outage, 
-        # or at block_start if it's upcoming. 
-        # Actually safer to start "approx now" to trigger notifications.
-        session_start = max(now, block_start - timedelta(minutes=30))
-        
+        # Session start_time is set to deadline (when power returns)
+        # This ensures workers are notified during power-ON period
+        # when they can actually refuel generators
         session = await self.repo.create_session(
-            start_time=session_start,
+            start_time=deadline,  # Workers notified when power returns
             deadline=deadline,
             worker1_id=worker1_id,
-            worker2_id=worker2_id
+            worker2_id=worker2_id,
+            worker3_id=worker3_id
         )
         
         # 6. Notify
         if self.notifier:
-            worker_list_str = f"{w1_name}, {w2_name}"
+            worker_list_str = f"{w1_name}, {w2_name}, {w3_name}"
             # Formatting dates for humans
             def fmt_dt(dt):
                 if dt.date() == now.date(): return dt.strftime('%H:%M')
@@ -170,22 +175,23 @@ class SessionService:
             
             if worker1_id: await self.notifier.notify_user(worker1_id, msg, reply_markup=kb)
             if worker2_id: await self.notifier.notify_user(worker2_id, msg, reply_markup=kb)
+            if worker3_id: await self.notifier.notify_user(worker3_id, msg, reply_markup=kb)
 
             admin_msg = f"🚀 <b>Створено сесію заправки</b> (ID: {session.id})\n" \
                         f"⏰ Період: {fmt_dt(block_start)} - {fmt_dt(deadline)}\n" \
                         f"👷 Воркери: {worker_list_str}\n"
             
-            if not worker1_id and not worker2_id:
-                admin_msg += "❌ <b>Помилка:</b> Воркери не знайдени в базі!"
+            if not worker1_id and not worker2_id and not worker3_id:
+                admin_msg += "❌ <b>Помилка:</b> Воркери не знайдені в базі!"
             
             await self.notifier.notify_admins(admin_msg)
             
         return session
 
-    async def _get_workers_for_start_time(self, start_dt: datetime) -> tuple[int | None, int | None, str, str]:
+    async def _get_workers_for_start_time(self, start_dt: datetime) -> tuple[int | None, int | None, int | None, str, str, str]:
         """Helper to find workers for a specific start time based on Sheets schedule"""
-        w1_name, w2_name = "Unknown", "Unknown"
-        worker1_id, worker2_id = None, None
+        w1_name, w2_name, w3_name = "Unknown", "Unknown", "Unknown"
+        worker1_id, worker2_id, worker3_id = None, None, None
         
         try:
             worker_tuples = self.sheets_service.get_workers_for_outage(
@@ -199,17 +205,17 @@ class SessionService:
                 if not user1: user1 = await self.user_repo.get_by_name(w1_name)
                 if user1: worker1_id = user1.id
                 
-            if len(worker_tuples) > 1:
-                w2_name, _ = worker_tuples[1]
-                user2 = await self.user_repo.get_by_sheet_name(w2_name)
-                if not user2: user2 = await self.user_repo.get_by_name(w2_name)
-                if user2: worker2_id = user2.id
+            if len(worker_tuples) > 2:
+                w3_name, _ = worker_tuples[2]
+                user3 = await self.user_repo.get_by_sheet_name(w3_name)
+                if not user3: user3 = await self.user_repo.get_by_name(w3_name)
+                if user3: worker3_id = user3.id
                 
-            logging.info(f"Workers lookup for {start_dt}: {w1_name} (ID: {worker1_id}), {w2_name} (ID: {worker2_id})")
+            logging.info(f"Workers lookup for {start_dt}: {w1_name} (ID: {worker1_id}), {w2_name} (ID: {worker2_id}), {w3_name} (ID: {worker3_id})")
         except Exception as e:
             logging.error(f"Failed to get workers: {e}")
             
-        return worker1_id, worker2_id, w1_name, w2_name
+        return worker1_id, worker2_id, worker3_id, w1_name, w2_name, w3_name
 
     async def create_manual_session(self, hours: int = 2) -> RefuelSession:
         """Manually create a session starting now for X hours"""
@@ -217,17 +223,18 @@ class SessionService:
         deadline = now + timedelta(hours=hours)
         
         # Auto-lookup workers for manual session using current time
-        worker1_id, worker2_id, w1_name, w2_name = await self._get_workers_for_start_time(now)
+        worker1_id, worker2_id, worker3_id, w1_name, w2_name, w3_name = await self._get_workers_for_start_time(now)
         
         session = await self.repo.create_session(
             start_time=now,
             deadline=deadline,
             worker1_id=worker1_id,
-            worker2_id=worker2_id
+            worker2_id=worker2_id,
+            worker3_id=worker3_id
         )
         
         if self.notifier:
-            worker_list_str = f"{w1_name}, {w2_name}"
+            worker_list_str = f"{w1_name}, {w2_name}, {w3_name}"
             msg = f"📝 <b>Ручне створення сесії</b>\n" \
                   f"ID: {session.id}\n" \
                   f"Дедлайн: {deadline.strftime('%H:%M')}\n" \
@@ -246,5 +253,6 @@ class SessionService:
             
             if worker1_id: await self.notifier.notify_user(worker1_id, worker_msg, reply_markup=kb)
             if worker2_id: await self.notifier.notify_user(worker2_id, worker_msg, reply_markup=kb)
+            if worker3_id: await self.notifier.notify_user(worker3_id, worker_msg, reply_markup=kb)
             
         return session

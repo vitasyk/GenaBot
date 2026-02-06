@@ -9,6 +9,7 @@ class InventoryStates(StatesGroup):
     waiting_for_stock_amount = State()
 
 class SessionStates(StatesGroup):
+    selecting_generators = State()
     waiting_for_generator = State()
     waiting_for_liters = State()
     waiting_for_notes = State()

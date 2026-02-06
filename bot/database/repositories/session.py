@@ -13,12 +13,14 @@ class SessionRepository:
                              start_time: datetime, 
                              deadline: datetime, 
                              worker1_id: Optional[int] = None, 
-                             worker2_id: Optional[int] = None) -> RefuelSession:
+                             worker2_id: Optional[int] = None,
+                             worker3_id: Optional[int] = None) -> RefuelSession:
         new_session = RefuelSession(
             start_time=start_time,
             deadline=deadline,
             worker1_id=worker1_id,
             worker2_id=worker2_id,
+            worker3_id=worker3_id,
             status=SessionStatus.pending
         )
         self.session.add(new_session)

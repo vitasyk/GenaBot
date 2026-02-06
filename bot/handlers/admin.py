@@ -72,11 +72,12 @@ async def admin_sessions_list(callback: types.CallbackQuery, bot: Bot):
             # Resolve worker names
             w1 = user_map.get(s.worker1_id, "—") if s.worker1_id else "—"
             w2 = user_map.get(s.worker2_id, "—") if s.worker2_id else "—"
+            w3 = user_map.get(s.worker3_id, "—") if s.worker3_id else "—"
             
-            if w1 == "—" and w2 == "—":
+            if w1 == "—" and w2 == "—" and w3 == "—":
                 workers_str = "немає воркерів"
             else:
-                workers_str = f"{w1}, {w2}"
+                workers_str = ", ".join([w for w in [w1, w2, w3] if w != "—"])
             
             # Button for each session
             builder.row(InlineKeyboardButton(
@@ -105,12 +106,12 @@ async def _admin_session_view_logic(callback: types.CallbackQuery, bot: Bot, ses
         if not s:
             await callback.answer("Сесію не знайдено")
             return
-# Get worker names within the SAME session
+        # Get worker names within the SAME session
         w1_name = "—"
         if s.worker1_id:
             u1 = await user_repo.get_by_id(s.worker1_id)
             if u1:
-                w1_name = u1.sheet_name if u1.sheet_name else u1.name
+                w1_name = u1.name or u1.sheet_name or f"@{u1.username}" or f"ID: {s.worker1_id}"
             else:
                 w1_name = f"ID: {s.worker1_id}"
             
@@ -118,9 +119,17 @@ async def _admin_session_view_logic(callback: types.CallbackQuery, bot: Bot, ses
         if s.worker2_id:
             u2 = await user_repo.get_by_id(s.worker2_id)
             if u2:
-                w2_name = u2.sheet_name if u2.sheet_name else u2.name
+                w2_name = u2.name or u2.sheet_name or f"@{u2.username}" or f"ID: {s.worker2_id}"
             else:
                 w2_name = f"ID: {s.worker2_id}"
+            
+        w3_name = "—"
+        if s.worker3_id:
+            u3 = await user_repo.get_by_id(s.worker3_id)
+            if u3:
+                w3_name = u3.name or u3.sheet_name or f"@{u3.username}" or f"ID: {s.worker3_id}"
+            else:
+                w3_name = f"ID: {s.worker3_id}"
             
         text = f"⛽ <b>Деталі сесії # {s.id}</b>\n\n"
         text += f"📊 <b>Статус:</b> <code>{s.status}</code>\n"
@@ -131,6 +140,7 @@ async def _admin_session_view_logic(callback: types.CallbackQuery, bot: Bot, ses
         
         text += f"\n👷 <b>Воркер 1:</b> {w1_name}\n"
         text += f"👷 <b>Воркер 2:</b> {w2_name}\n"
+        text += f"👷 <b>Воркер 3:</b> {w3_name}\n"
         
         if s.status == 'completed':
             # Resolve completed_by

@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import logging
 from bot.database.repositories.generator import GeneratorRepository
 from bot.database.repositories.logs import LogRepository
 from bot.database.models import Generator, GenStatus

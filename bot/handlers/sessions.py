@@ -9,7 +9,8 @@ from bot.database.repositories.session import SessionRepository
 from bot.database.models import SessionStatus
 from bot.keyboards.session_kb import (
     get_in_progress_kb, 
-    get_gen_choice_kb, 
+    get_gen_choice_kb,
+    get_gen_selection_kb,
     get_skip_kb
 )
 
@@ -46,11 +47,59 @@ async def start_session_handler(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("session_complete:"))
 async def complete_session_start(callback: CallbackQuery, state: FSMContext):
     session_id = int(callback.data.split(":")[1])
-    await state.update_data(session_id=session_id)
+    await state.update_data(session_id=session_id, selected_gens=[])
     
-    await callback.message.edit_text("⚡️ <b>Завершення сесії</b>\n\nЯкий генератор заправили?", 
-                                     reply_markup=get_gen_choice_kb())
-    await state.set_state(SessionStates.waiting_for_generator)
+    await callback.message.edit_text(
+        "⚡️ <b>Завершення сесії</b>\n\n"
+        "Оберіть генератори які були заправлені:",
+        reply_markup=get_gen_selection_kb([])
+    )
+    await state.set_state(SessionStates.selecting_generators)
+    await callback.answer()
+
+@router.callback_query(SessionStates.selecting_generators, F.data.startswith("toggle_gen:"))
+async def toggle_generator(callback: CallbackQuery, state: FSMContext):
+    gen_name = callback.data.split(":")[1]
+    data = await state.get_data()
+    selected = data.get("selected_gens", [])
+    
+    # Toggle
+    if gen_name in selected:
+        selected.remove(gen_name)
+    else:
+        selected.append(gen_name)
+    
+    await state.update_data(selected_gens=selected)
+    
+    # Update keyboard
+    await callback.message.edit_reply_markup(
+        reply_markup=get_gen_selection_kb(selected)
+    )
+    await callback.answer()
+
+@router.callback_query(SessionStates.selecting_generators, F.data == "gen_confirm")
+async def confirm_generators(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    selected_gens = data.get("selected_gens", [])
+    
+    if not selected_gens:
+        await callback.answer("Оберіть хоча б один генератор!", show_alert=True)
+        return
+    
+    # Start collecting fuel amounts
+    await state.update_data(
+        gen_fuel_data={},  # Will store {gen_name: liters}
+        current_gen_index=0
+    )
+    
+    first_gen = selected_gens[0]
+    await callback.message.edit_text(
+        f"⛽️ <b>{first_gen}</b>\n\n"
+        f"Скільки літрів залили до {first_gen}?\n"
+        "Введіть число (наприклад: 20.5).",
+        reply_markup=None
+    )
+    await state.set_state(SessionStates.waiting_for_liters)
     await callback.answer()
 
 @router.callback_query(SessionStates.waiting_for_generator, F.data.startswith("gen_choice:"))
@@ -68,16 +117,54 @@ async def generator_chosen(callback: CallbackQuery, state: FSMContext):
 async def liters_input(message: Message, state: FSMContext):
     try:
         liters = float(message.text.strip().replace(",", "."))
-        await state.update_data(liters=liters)
+        data = await state.get_data()
         
-        # Calculate cans approximately (assume 20L can?)
-        # For now just simple estimation or ask separately. 
-        # Plan says "Cans: Mapped[float]". Let's assume user inputs LITERS.
-        # We can calculate cans later or ask. Let's ask Notes validation.
-        
-        await message.answer("📝 <b>Додати нотатки?</b>\n(наприклад: 'залив масло', 'були проблеми')\n\nНатисніть 'Пропустити', якщо немає.", 
-                             reply_markup=get_skip_kb())
-        await state.set_state(SessionStates.waiting_for_notes)
+        # Check if we're using multi-generator flow
+        if "selected_gens" in data and "gen_fuel_data" in data:
+            # Multi-generator flow
+            selected_gens = data["selected_gens"]
+            current_index = data["current_gen_index"]
+            gen_fuel_data = data.get("gen_fuel_data", {})
+            
+            # Store fuel for current generator
+            current_gen = selected_gens[current_index]
+            gen_fuel_data[current_gen] = liters
+            
+            # Move to next generator
+            next_index = current_index + 1
+            
+            if next_index < len(selected_gens):
+                # Ask for next generator
+                await state.update_data(
+                    gen_fuel_data=gen_fuel_data,
+                    current_gen_index=next_index
+                )
+                
+                next_gen = selected_gens[next_index]
+                await message.answer(
+                    f"⛽️ <b>{next_gen}</b>\n\n"
+                    f"Скільки літрів залили до {next_gen}?\n"
+                    "Введіть число (наприклад: 20.5)."
+                )
+            else:
+                # All generators done, ask for notes
+                await state.update_data(gen_fuel_data=gen_fuel_data)
+                await message.answer(
+                    "📝 <b>Додати нотатки?</b>\n"
+                    "(наприклад: 'залив масло', 'були проблеми')\n\n"
+                    "Натисніть 'Пропустити', якщо немає.",
+                    reply_markup=get_skip_kb()
+                )
+                await state.set_state(SessionStates.waiting_for_notes)
+        else:
+            # Old single-generator flow (fallback)
+            await state.update_data(liters=liters)
+            await message.answer(
+                "📝 <b>Додати нотатки?</b>\n(наприклад: 'залив масло', 'були проблеми')\n\n"
+                "Натисніть 'Пропустити', якщо немає.", 
+                reply_markup=get_skip_kb()
+            )
+            await state.set_state(SessionStates.waiting_for_notes)
         
     except ValueError:
         await message.answer("⚠️ Будь ласка, введіть коректне число (наприклад 10.5).")
@@ -96,37 +183,73 @@ async def finish_session(event: Message | CallbackQuery, state: FSMContext):
         await event.answer()
         
     session_id = data.get("session_id")
-    gen_choice = data.get("gen_name")
-    liters = data.get("liters")
-    
     user_id = event.from_user.id
     
-    async with session_maker() as session:
-        repo = SessionRepository(session)
+    # Check if multi-generator flow
+    if "gen_fuel_data" in data:
+        # Multi-generator flow
+        gen_fuel_data = data.get("gen_fuel_data", {})
+        total_liters = sum(gen_fuel_data.values())
+        total_cans = total_liters / 20.0
         
-        # Assume 1 can = 20L for calculation (Need standard)
-        # Or just store 0 for now
-        cans = liters / 20.0 
+        # Format as "GEN-003: 15л, GEN-038: 10л"
+        gen_summary = ", ".join([f"{name}: {liters}л" for name, liters in gen_fuel_data.items()])
         
-        completed_session = await repo.complete_session(
-            session_id=session_id,
-            completed_by=user_id,
-            gen_name=gen_choice,
-            liters=liters,
-            cans=cans,
-            notes=notes
-        )
+        async with session_maker() as session:
+            repo = SessionRepository(session)
+            
+            completed_session = await repo.complete_session(
+                session_id=session_id,
+                completed_by=user_id,
+                gen_name=gen_summary,
+                liters=total_liters,
+                cans=total_cans,
+                notes=notes
+            )
+            
+            # Confirmation with breakdown
+            gen_list = "\n".join([f"  • {name}: {liters}л" for name, liters in gen_fuel_data.items()])
+            msg = (
+                f"✅ <b>Сесію #{session_id} завершено!</b>\n\n"
+                f"👤 Воркер: {event.from_user.full_name}\n"
+                f"⚡️ Генератори:\n{gen_list}\n"
+                f"⛽️ Всього: {total_liters}л ({total_cans:.1f} кан)\n"
+                f"🕒 Час: {completed_session.end_time.strftime('%H:%M')}"
+            )
+            
+            if isinstance(event, CallbackQuery):
+                await event.message.edit_text(msg)
+            else:
+                await event.answer(msg)
+    else:
+        # Old single-generator flow (fallback)
+        gen_choice = data.get("gen_name")
+        liters = data.get("liters")
+        cans = liters / 20.0
         
-        # Final confirmation
-        msg = (f"✅ <b>Сесію # {session_id} завершено!</b>\n\n"
-               f"👤 Воркер: {event.from_user.full_name}\n"
-               f"⚡️ Генератор: {gen_choice}\n"
-               f"⛽️ Паливо: {liters}л ({cans:.1f} кан)\n"
-               f"🕒 Час: {completed_session.end_time.strftime('%H:%M')}")
-        
-        if isinstance(event, CallbackQuery):
-            await event.message.edit_text(msg)
-        else:
-            await event.answer(msg)
+        async with session_maker() as session:
+            repo = SessionRepository(session)
+            
+            completed_session = await repo.complete_session(
+                session_id=session_id,
+                completed_by=user_id,
+                gen_name=gen_choice,
+                liters=liters,
+                cans=cans,
+                notes=notes
+            )
+            
+            msg = (
+                f"✅ <b>Сесію # {session_id} завершено!</b>\n\n"
+                f"👤 Воркер: {event.from_user.full_name}\n"
+                f"⚡️ Генератор: {gen_choice}\n"
+                f"⛽️ Паливо: {liters}л ({cans:.1f} кан)\n"
+                f"🕒 Час: {completed_session.end_time.strftime('%H:%M')}"
+            )
+            
+            if isinstance(event, CallbackQuery):
+                await event.message.edit_text(msg)
+            else:
+                await event.answer(msg)
             
     await state.clear()

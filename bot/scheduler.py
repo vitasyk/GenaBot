@@ -121,9 +121,6 @@ async def warming_check_job(bot: Bot):
     
     await redis_client.close()
 
-    # Check weather daily at 8:00 AM
-    scheduler.add_job(weather_check_job, CronTrigger(hour=8, minute=0), args=[bot])
-    
 def start_scheduler(bot: Bot):
     # Check rotation every 30 mins
     scheduler.add_job(check_rotation_needed, IntervalTrigger(minutes=30), args=[bot])

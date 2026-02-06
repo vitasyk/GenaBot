@@ -49,18 +49,33 @@ class GoogleSheetsService:
         if not all_values or len(all_values) < 2:
             return None
         
-        # Row 1 has day names: Нд, Пн, Вт, ...
-        # Look for pattern matching the day of month
         day_num = target_date.day
         
         # Search in first few rows for date indicators
         for row_idx in range(min(3, len(all_values))):
             row = all_values[row_idx]
             for col_idx, cell in enumerate(row):
-                # Look for day number (e.g., "3" for 3rd day)
-                if cell.strip() == str(day_num):
+                cell_value = cell.strip()
+                
+                # Try multiple patterns:
+                # 1. Exact match: "6"
+                if cell_value == str(day_num):
+                    logging.info(f"Found date column {col_idx} for {target_date} (exact match: '{cell_value}')")
+                    return col_idx
+                
+                # 2. Day + number: "Чт 6", "Пн 3"
+                if ' ' in cell_value:
+                    parts = cell_value.split()
+                    if len(parts) >= 2 and parts[-1].strip() == str(day_num):
+                        logging.info(f"Found date column {col_idx} for {target_date} (pattern match: '{cell_value}')")
+                        return col_idx
+                
+                # 3. Zero-padded: "06"
+                if cell_value == f"{day_num:02d}":
+                    logging.info(f"Found date column {col_idx} for {target_date} (zero-padded: '{cell_value}')")
                     return col_idx
         
+        logging.warning(f"Could not find column for date {target_date}, using fallback")
         # Fallback: estimate based on day of month
         # Assuming columns start from column 2 (after name and phone)
         # and cycle through weeks
@@ -119,29 +134,44 @@ class GoogleSheetsService:
         """
         Get best 2 workers based on outage start time
         Logic:
-        - Outage < 08:00 (Night/Morning) -> Workers starting at 20:00 ON PREVIOUS DAY
-        - Outage 08:00 - 18:00 (Day) -> Workers starting at 09:00, 11:00, 13:00 on target_date
-        - Outage >= 18:00 (Evening)  -> Workers starting at 13:00, 20:00 on target_date
+        - Outage < 07:00 (Night/Morning) -> Workers starting at 20:00 ON PREVIOUS DAY
+        - Outage 07:00 - 18:59 (Day) -> Workers whose shift started BEFORE outage (within 6h)
+        - Outage >= 19:00 (Evening)  -> Workers starting at 13:00, 15:00, 17:00, 20:00 on target_date
         """
         if target_date is None:
             target_date = datetime.now().date()
         
         # Map outage time to preferred shift start times
-        if outage_start_hour < 8:  # Early morning outage (e.g. 02:00)
+        if outage_start_hour < 7:  # Early morning outage (e.g. 02:00)
             # The worker covering this started at 20:00 YESTERDAY
             lookup_date = target_date - timedelta(days=1)
             preferred_hours = [20]
             logging.info(f"Early morning outage ({outage_start_hour}:00), checking 20:00 shift on {lookup_date}")
-        elif outage_start_hour < 18:  # Day outage
+        elif outage_start_hour < 19:  # Day outage
             lookup_date = target_date
-            preferred_hours = [9, 11, 13]
-        else:  # Evening/night outage (e.g. 22:00)
+            all_day_hours = [7, 8, 9, 11, 13, 15, 17]
+            
+            # Filter: only shifts that started BEFORE outage (within 8 hours)
+            # Workers have 8-hour shifts, so include all shifts still in progress
+            preferred_hours = [h for h in all_day_hours 
+                               if h <= outage_start_hour 
+                               and outage_start_hour - h <= 8]
+            
+            # Fallback: if no shifts match criteria, take earliest shift
+            if not preferred_hours:
+                preferred_hours = [min(all_day_hours)]
+            
+            logging.info(f"Day outage ({outage_start_hour}:00), checking shifts started at: {preferred_hours}")
+        else:  # Evening/night outage (e.g. 19:00+)
             lookup_date = target_date
-            preferred_hours = [13, 20]  # Per user request
+            preferred_hours = [13, 15, 17, 20]  # Evening and night shifts
+            logging.info(f"Evening outage ({outage_start_hour}:00), checking shifts: {preferred_hours}")
         
         all_candidates = []
         
-        for hour in preferred_hours:
+        # Reverse order to prioritize LATER/CLOSER shifts
+        # (workers who are more likely still working)
+        for hour in reversed(preferred_hours):
             workers = self.get_workers_for_time(lookup_date, hour)
             all_candidates.extend(workers)
         
@@ -153,5 +183,5 @@ class GoogleSheetsService:
                 unique_candidates.append(worker)
                 seen_names.add(worker[0])
         
-        return unique_candidates[:2]
+        return unique_candidates[:3]  # Return top 3 workers
 
