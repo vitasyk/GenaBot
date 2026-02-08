@@ -83,6 +83,7 @@ class SessionService:
                     continue
                 
                 # Create session for this finished block
+                # deadline is the time power returned
                 return await self._create_outage_session(block[0], deadline)
 
             # --- Condition B: Impending Deadline (Reminder for Active Session) ---
@@ -106,11 +107,11 @@ class SessionService:
         """Internal helper to create session and notify workers/admins"""
         now = datetime.now()
         
-        # Determine workers from Sheets
+        # Determine workers from Sheets for the DEADLINE (power return time)
         try:
             worker_tuples = self.sheets_service.get_workers_for_outage(
-                outage_start_hour=block_start.hour,
-                target_date=block_start.date()
+                outage_start_hour=deadline.hour,
+                target_date=deadline.date()
             )
             logging.info(f"Block detected: {block_start} to {deadline}. Assigned: {[w[0] for w in worker_tuples]}")
         except Exception as e:
@@ -119,10 +120,12 @@ class SessionService:
 
         w1_id, w2_id, w3_id, w1_n, w2_n, w3_n = await self._get_workers_from_tuples(worker_tuples)
 
-        # Create Session
+        # Create Session with 2-hour duration from NOW
+        effective_deadline = now + timedelta(hours=2)
+        
         session = await self.repo.create_session(
             start_time=deadline,  # Notified at power return
-            deadline=deadline,
+            deadline=effective_deadline,
             worker1_id=w1_id,
             worker2_id=w2_id,
             worker3_id=w3_id
@@ -238,9 +241,13 @@ class SessionService:
         user = await self.user_repo.get_by_name(name)
         if user: return user
         
-        # 3. Clean names and try again (remove common prefixes like 'а64 ')
+        # 3. Clean names and try again (remove common prefixes like 'а64 ', 'а81 ')
         import re
+        # Remove multiple prefixes like 'а64 ' or 'a81 '
         clean_name = re.sub(r'^[аa]\d+\s+', '', name).strip()
+        # Sometimes there might be multiple or nested (rare but possible)
+        clean_name = re.sub(r'^[аa]\d+\s+', '', clean_name).strip()
+        
         if clean_name != name:
              # Try sheet_name with cleaned name
              user = await self.user_repo.get_by_sheet_name(clean_name)
