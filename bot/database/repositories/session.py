@@ -44,7 +44,13 @@ class SessionRepository:
         """Check if a session with this exact deadline already exists"""
         stmt = select(RefuelSession).where(RefuelSession.deadline == deadline)
         result = await self.session.execute(stmt)
-        return result.scalar_one_or_none() is not None
+        return result.scalars().first() is not None
+
+    async def exists_by_start_time(self, start_time: datetime) -> bool:
+        """Check if a session with this exact start_time already exists"""
+        stmt = select(RefuelSession).where(RefuelSession.start_time == start_time)
+        result = await self.session.execute(stmt)
+        return result.scalars().first() is not None
         
     async def update_status(self, session_id: int, status: SessionStatus) -> Optional[RefuelSession]:
         stmt = update(RefuelSession).where(RefuelSession.id == session_id).values(status=status)

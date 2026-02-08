@@ -53,7 +53,24 @@ async def _get_status_panel(generator_service: GeneratorService, with_keyboard: 
         if g.status == GenStatus.running:
              text += f"   ⏳ <b>Вистачить на:</b> ~{hours_left:.1f} год\n"
              if g.current_run_start:
-                  text += f"   🕒 <b>Запущено о:</b> {g.current_run_start.strftime('%H:%M')}\n"
+                  # Convert UTC to Configured Timezone
+                  from bot.config import config
+                  from datetime import timezone
+                  import zoneinfo
+                  
+                  try:
+                      tz = zoneinfo.ZoneInfo(config.TIMEZONE)
+                      # Ensure current_run_start is aware (it's naive usually in SQLAlchemy if not forced)
+                      # Assuming it's UTC naive
+                      utc_time = g.current_run_start.replace(tzinfo=timezone.utc)
+                      local_time = utc_time.astimezone(tz)
+                      time_str = local_time.strftime('%H:%M')
+                  except Exception as e:
+                      # Fallback
+                      logging.error(f"Timezone error: {e}")
+                      time_str = g.current_run_start.strftime('%H:%M UTC')
+
+                  text += f"   🕒 <b>Запущено о:</b> {time_str}\n"
         else:
              text += f"   💤 <b>Очікуваний час роботи:</b> ~{hours_left:.1f} год\n"
              
@@ -189,27 +206,49 @@ async def back_to_status_callback(callback: types.CallbackQuery, generator_servi
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
 @router.callback_query(F.data.startswith("correct_select_"))
-async def correct_options(callback: types.CallbackQuery, state: FSMContext):
+async def correct_options(callback: types.CallbackQuery, state: FSMContext, generator_service: GeneratorService):
     gen_name = callback.data.split("_")[2]
     await state.update_data(gen_name=gen_name)
     
-    await callback.message.edit_text(f"⚙️ <b>{gen_name}</b>\nЩо хочете змінити?", reply_markup=_get_correction_keyboard(), parse_mode="HTML")
+    # Fetch current specs
+    gen = await generator_service.repo.get_by_name(gen_name)
+    if not gen:
+        await callback.answer("Генератор не знайдено")
+        return
+
+    text = f"⚙️ <b>{gen_name}</b>\n"
+    text += "➖➖➖➖➖➖➖➖➖➖\n"
+    text += f"⛽ <b>Залишок:</b> {gen.fuel_level:.1f} л\n"
+    text += f"🛢️ <b>Об'єм бака:</b> {gen.tank_capacity:.1f} л\n"
+    text += f"📉 <b>Споживання:</b> {gen.consumption_rate:.1f} л/год\n"
+    text += "➖➖➖➖➖➖➖➖➖➖\n"
+    text += "Що хочете змінити?"
+    
+    await callback.message.edit_text(text, reply_markup=_get_correction_keyboard(), parse_mode="HTML")
 
 @router.callback_query(F.data.startswith("correct_mode_"))
-async def correct_init(callback: types.CallbackQuery, state: FSMContext):
+async def correct_init(callback: types.CallbackQuery, state: FSMContext, generator_service: GeneratorService):
     mode = callback.data.split("_")[2]
     data = await state.get_data()
     gen_name = data.get("gen_name")
     
+    # Fetch current value for prompt
+    gen = await generator_service.repo.get_by_name(gen_name)
+    current_val = 0
+    if gen:
+        if mode == "fuel": current_val = gen.fuel_level
+        elif mode == "tank": current_val = gen.tank_capacity
+        elif mode == "rate": current_val = gen.consumption_rate
+
     if mode == "fuel":
         await state.set_state(GenStates.waiting_for_fuel_amount)
-        txt = f"✍️ Введіть точний залишок палива (л) для <b>{gen_name}</b>:"
+        txt = f"✍️ Введіть точний залишок палива (л) для <b>{gen_name}</b>:\n(Зараз встановлено: <b>{current_val:.1f}</b> л)"
     elif mode == "tank":
         await state.set_state(GenStates.waiting_for_tank_capacity)
-        txt = f"✍️ Введіть об'єм бака (л) для <b>{gen_name}</b>:"
+        txt = f"✍️ Введіть об'єм бака (л) для <b>{gen_name}</b>:\n(Зараз встановлено: <b>{current_val:.1f}</b> л)"
     elif mode == "rate":
         await state.set_state(GenStates.waiting_for_consumption_rate)
-        txt = f"✍️ Введіть споживання (л/год) для <b>{gen_name}</b>:"
+        txt = f"✍️ Введіть споживання (л/год) для <b>{gen_name}</b>:\n(Зараз встановлено: <b>{current_val:.1f}</b> л/год)"
         
     await callback.message.answer(txt, parse_mode="HTML")
     await callback.answer()

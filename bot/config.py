@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "console"
     
+    # Timezone
+    TIMEZONE: str = "Europe/Kiev"
+    
     # Security
     SECRET_KEY: SecretStr
     

@@ -79,7 +79,8 @@ class SessionService:
             # This is the PRIMARY trigger for refueling sessions.
             if now >= deadline and now < deadline + timedelta(hours=1):
                 # Check if session already exists for this block
-                if await self.repo.exists_by_deadline(deadline):
+                # We use deadline (power return time) as the storage key for start_time
+                if await self.repo.exists_by_start_time(deadline):
                     continue
                 
                 # Create session for this finished block
@@ -107,13 +108,14 @@ class SessionService:
         """Internal helper to create session and notify workers/admins"""
         now = datetime.now()
         
-        # Determine workers from Sheets for the DEADLINE (power return time)
+        # Determine workers from Sheets for the period JUST BEFORE restoration
         try:
+            lookup_dt = deadline - timedelta(minutes=1)
             worker_tuples = self.sheets_service.get_workers_for_outage(
-                outage_start_hour=deadline.hour,
-                target_date=deadline.date()
+                outage_start_hour=lookup_dt.hour,
+                target_date=lookup_dt.date()
             )
-            logging.info(f"Block detected: {block_start} to {deadline}. Assigned: {[w[0] for w in worker_tuples]}")
+            logging.info(f"Block detected: {block_start} to {deadline}. Lookup hour: {lookup_dt.hour}. Assigned: {[w[0] for w in worker_tuples]}")
         except Exception as e:
             logging.error(f"Failed to get workers for block: {e}")
             worker_tuples = []
@@ -198,9 +200,11 @@ class SessionService:
         worker1_id, worker2_id, worker3_id = None, None, None
         
         try:
+            # Use 1 minute before to avoid picking 'just-started' shifts at boundary hours
+            lookup_dt = start_dt - timedelta(minutes=1)
             worker_tuples = self.sheets_service.get_workers_for_outage(
-                outage_start_hour=start_dt.hour,
-                target_date=start_dt.date()
+                outage_start_hour=lookup_dt.hour,
+                target_date=lookup_dt.date()
             )
             
             logging.info(f"Sheets returned {len(worker_tuples)} workers for {start_dt}")

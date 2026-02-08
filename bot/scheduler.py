@@ -40,19 +40,37 @@ async def check_rotation_needed(bot: Bot):
             msg = f"⚠️ <b>УВАГА: ПОТРІБНА РОТАЦІЯ!</b>\nГенератор {running_gen.name} працює вже {hours_run:.1f} год.\nТерміново перемкніть на інший!"
         elif hours_run >= WARN_HOURS and hours_run < WARN_HOURS + 0.6: 
             # Check inventory for next gen
-            stock = await inv_repo.get_stock()
-            fuel_status = f"Запас на складі: {stock} каністр."
-            if stock < 1:
+            stock_liters = await inv_repo.get_stock()
+            stock_cans = stock_liters / 20.0
+            fuel_status = f"Запас на складі: {stock_cans:.1f} каністр ({stock_liters}л)."
+            if stock_cans < 1:
                 fuel_status += " ⚠️ МАЛО ПАЛИВА! Немає чим заправити наступний."
             
             # Predict remaining fuel in current gen
-            fuel_left = running_gen.fuel_level
-            burn_rate = running_gen.consumption_rate
-            time_left = fuel_left / burn_rate if burn_rate > 0 else 0
+            # 1. Get weather factor
+            weather = WeatherService()
+            temp = await weather.get_current_temperature()
+            factor = weather.get_consumption_factor(temp)
+            
+            # 2. Calculate consumed fuel during this run
+            # running_gen.consumption_rate is L/h
+            base_rate = running_gen.consumption_rate
+            actual_rate = base_rate * factor
+            consumed = hours_run * actual_rate
+            
+            # 3. Calculate current level
+            # fuel_level is the level at start or last refuel/correction?
+            # Usually fuel_level is updated ONLY when stopped or refueled. 
+            # So start_level = running_gen.fuel_level
+            start_level = running_gen.fuel_level
+            current_level = start_level - consumed
+            if current_level < 0: current_level = 0.0
+            
+            time_left = current_level / actual_rate if actual_rate > 0 else 0
             
             msg = (f"⚠️ <b>Рекомендовано ротацію</b>\n"
                    f"{running_gen.name} працює: {hours_run:.1f} год.\n"
-                   f"У баку: {fuel_left:.1f}л (~{time_left:.1f} год).\n"
+                   f"У баку: {current_level:.1f}л (~{time_left:.1f} год).\n"
                    f"{fuel_status}\n"
                    f"Плануйте перемикання у найближчі 2 години.")
 
