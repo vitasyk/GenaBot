@@ -13,6 +13,8 @@ from bot.services.inventory import InventoryService
 from bot.services.generator import GeneratorService
 from bot.services.weather import WeatherService
 from bot.services.notifier import NotifierService
+from bot.services.slack import SlackService
+from bot.config import config
 
 class DbSessionMiddleware(BaseMiddleware):
     def __init__(self, session_pool: async_sessionmaker, redis: Redis, notifier: NotifierService):
@@ -42,7 +44,11 @@ class DbSessionMiddleware(BaseMiddleware):
             data["user_repo"] = user_repo
             data["log_repo"] = log_repo
             data["schedule_repo"] = schedule_repo
-            data["inventory_service"] = InventoryService(inventory_repo, log_repo, user_repo, bot)
+            
+            # Slack Service
+            slack_service = SlackService(config.SLACK_WEBHOOK_URL)
+            
+            data["inventory_service"] = InventoryService(inventory_repo, log_repo, user_repo, bot, slack_service)
             # Inject redis and notifier
             data["generator_service"] = GeneratorService(gen_repo, log_repo, self.notifier, self.redis)
             data["weather_service"] = WeatherService()

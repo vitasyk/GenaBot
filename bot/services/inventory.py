@@ -1,15 +1,18 @@
+from datetime import datetime
 from bot.database.repositories.inventory import InventoryRepository
 from bot.database.repositories.logs import LogRepository
 from bot.database.repositories.user import UserRepository
+from bot.services.slack import SlackService
 from bot.config import config
 from aiogram import Bot
 
 class InventoryService:
-    def __init__(self, inventory_repo: InventoryRepository, log_repo: LogRepository, user_repo: UserRepository, bot: Bot):
+    def __init__(self, inventory_repo: InventoryRepository, log_repo: LogRepository, user_repo: UserRepository, bot: Bot, slack_service: SlackService):
         self.repo = inventory_repo
         self.logs = log_repo
         self.users = user_repo
         self.bot = bot
+        self.slack = slack_service
 
     async def check_stock(self) -> int:
         """Returns stock in LITERS"""
@@ -20,8 +23,18 @@ class InventoryService:
         await self.logs.log_action(user_id, "TAKE_FUEL", f"Taken: {liters}L. Remaining: {new_amount}L")
         
         # Check for critical alert (e.g. less than 2 cans = 40L)
+        # 1. Telegram Alert
         if new_amount < 40:
-             await self._alert_admins(f"⚠️ <b>CRITICAL FUEL ALERT!</b>\nRemaining: {new_amount}L ({new_amount/20:.1f} cans)")
+             await self._alert_admins(f"⚠️ <b>CRITICAL FUEL ALERT!</b>\nRemaining: {new_amount}L ({new_amount/20.0:.1f} cans)")
+        
+        # 2. Slack Alert (Configurable)
+        current_cans = new_amount / 20.0
+        if current_cans < config.FUEL_THRESHOLD_CANS:
+             await self.slack.send_message(
+                 f"⛽ *Low Fuel Alert*\n"
+                 f"Current stock: *{current_cans:.2f}* cans ({new_amount}L)\n"
+                 f"Threshold: {config.FUEL_THRESHOLD_CANS} cans"
+             )
              
         return new_amount
 
@@ -34,6 +47,26 @@ class InventoryService:
         new_amount = await self.repo.update_stock(liters)
         await self.logs.log_action(user_id, "ADD_FUEL", f"Added: {cans} cans ({liters}L). Total: {new_amount}L")
         return new_amount
+
+    async def update_last_refill_date(self, user_id: int, new_date: datetime) -> bool:
+        """Update the timestamp of the very last ADD_FUEL event"""
+        last_event = await self.logs.get_last_action("ADD_FUEL")
+        if not last_event:
+            return False
+            
+        # Update timestamp (keeping original time part if we want, or just setting to new_date at noon/current)
+        # To be simple and robust, let's just use the date part and keep time as is or set to current.
+        # User usually wants to say "it was yesterday".
+        
+        # Merge date from new_date and time from current last_event
+        from datetime import datetime
+        updated_ts = datetime.combine(new_date.date(), last_event.timestamp.time())
+        
+        last_event.timestamp = updated_ts
+        await self.repo.session.commit()
+        
+        await self.logs.log_action(user_id, "CORRECT_REFILL_DATE", f"Updated last refill to {updated_ts.strftime('%d.%m.%Y %H:%M')}")
+        return True
 
     async def _alert_admins(self, text: str):
         from bot.services.notifier import NotifierService
@@ -76,6 +109,7 @@ class InventoryService:
             "stock_liters": stock_liters,
             "stock_cans": stock_cans,
             "last_refill_date": last_refill_date,
+            "total_weekly_consumption": total_consumed,
             "avg_daily_consumption": avg_daily,
             "avg_hourly_consumption": avg_hourly,
             "hours_left": hours_left

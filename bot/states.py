@@ -25,3 +25,9 @@ class ScheduleStates(StatesGroup):
     waiting_for_periods = State()
     confirming = State()
     waiting_for_download_confirm = State()
+    waiting_for_screenshot = State()
+
+class SlackStates(StatesGroup):
+    """States for Slack configuration"""
+    waiting_for_threshold = State()
+    waiting_for_message = State()

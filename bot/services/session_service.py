@@ -46,53 +46,51 @@ class SessionService:
 
     async def check_power_outage(self) -> Optional[RefuelSession]:
         """
-        Check outage timeline and create session for upcoming or current blocks.
-        Handles continuity across midnight.
+        Check outage timeline and create session for any recently finished block.
+        Ensures workers are notified in real-time when power returns according to schedule.
         """
-        # 1. Fetch Timeline from DATABASE (not parser)
+        # 1. Fetch Timeline from DATABASE
         timeline = await self.get_outage_timeline_from_db(queue="1.1")
         if not timeline:
             return None
             
         now = datetime.now()
-        # Look ahead window: 60 minutes
-        lookahead = now + timedelta(minutes=60)
         
-        # Determine if we are near or in an outage
-        target_dt = None
-        for dt in timeline:
-            # If outage is happening now OR starts within 60 mins
-            if dt <= lookahead and dt + timedelta(hours=1) > now:
-                target_dt = dt
-                break
-        
-        if not target_dt:
-            return None
+        # 2. Group timeline into continuous blocks
+        blocks = []
+        if timeline:
+            current_block = [timeline[0]]
+            for i in range(1, len(timeline)):
+                if timeline[i] == timeline[i-1] + timedelta(hours=1):
+                    current_block.append(timeline[i])
+                else:
+                    blocks.append(current_block)
+                    current_block = [timeline[i]]
+            blocks.append(current_block)
+
+        # 3. Analyze each block for "Power Return" events
+        for block in blocks:
+            # block_start = block[0]
+            block_end = block[-1]
+            deadline = block_end + timedelta(hours=1)
             
-        # 2. Identify the continuous block this target belongs to
-        # Find start of block
-        block_start = target_dt
-        while block_start - timedelta(hours=1) in timeline:
-            block_start -= timedelta(hours=1)
-            
-        # Find end of block
-        block_end = target_dt
-        while block_end + timedelta(hours=1) in timeline:
-            block_end += timedelta(hours=1)
-            
-        deadline = block_end + timedelta(hours=1)
-        
-        # 3. Check if session for this block already exists
-        active_session = await self.repo.get_active_session()
-        
-        # Power Restoration Monitoring:
-        if active_session:
-            # If we have an active session, check if power is back
-            # 1. Check if deadline passed
-            if now >= active_session.deadline:
-                # Notify and mark as expired/awaiting completion if still in_progress
-                if active_session.status in [SessionStatus.pending.value, SessionStatus.in_progress.value]:
-                    msg = f"🔔 <b>Час спливає!</b> Сесія {active_session.id} досягає дедлайну о {active_session.deadline.strftime('%H:%M')}. Будь ласка, завершіть заправку."
+            # --- Condition A: Outage Transition (Power Return) ---
+            # Trigger if we are at or past the deadline, but within a 'catch-up' window (e.g. 60 mins)
+            # This is the PRIMARY trigger for refueling sessions.
+            if now >= deadline and now < deadline + timedelta(hours=1):
+                # Check if session already exists for this block
+                if await self.repo.exists_by_deadline(deadline):
+                    continue
+                
+                # Create session for this finished block
+                return await self._create_outage_session(block[0], deadline)
+
+            # --- Condition B: Impending Deadline (Reminder for Active Session) ---
+            # If an active session exists and its deadline is approaching/passed, notify once.
+            active_session = await self.repo.get_active_session()
+            if active_session and active_session.deadline == deadline:
+                if now >= deadline and active_session.status in [SessionStatus.pending.value, SessionStatus.in_progress.value]:
+                    msg = f"🔔 <b>Час спливає!</b> Сесія {active_session.id} досягла дедлайну о {active_session.deadline.strftime('%H:%M')}. Будь ласка, завершіть заправку."
                     
                     if active_session.worker1_id: await self.notifier.notify_user(active_session.worker1_id, msg)
                     if active_session.worker2_id: await self.notifier.notify_user(active_session.worker2_id, msg)
@@ -101,101 +99,89 @@ class SessionService:
                     
                     # Update status to avoid re-notifying
                     await self.repo.update_status(active_session.id, SessionStatus.completed)
-            
-            # 2. Check if current block covers this session
-            if active_session.start_time <= target_dt < active_session.deadline:
-                return None
-            
-        # 4. Trigger Check: Notification should happen when light appeared (at deadline)
-        # We trigger when 'now' is close to or past the deadline, but within a reasonable window
-        # to ensure we don't miss it between ticks.
-        if now < deadline:
-            # Power is still out (or outage hasn't started), wait for restoration.
-            return None
-            
-        # If we are more than 2 hours past the deadline, it might be too late to auto-create
-        # (unless we have a very long interval between checks, but default is 15-30m)
-        if now > deadline + timedelta(hours=2):
-            return None
+        
+        return None
 
+    async def _create_outage_session(self, block_start: datetime, deadline: datetime) -> RefuelSession:
+        """Internal helper to create session and notify workers/admins"""
+        now = datetime.now()
+        
+        # Determine workers from Sheets
         try:
             worker_tuples = self.sheets_service.get_workers_for_outage(
                 outage_start_hour=block_start.hour,
                 target_date=block_start.date()
             )
-            logging.info(f"Block found: {block_start} to {deadline}. Assigned names from Sheets: {[w[0] for w in worker_tuples]}")
+            logging.info(f"Block detected: {block_start} to {deadline}. Assigned: {[w[0] for w in worker_tuples]}")
         except Exception as e:
-            logging.error(f"Failed to get workers: {e}")
+            logging.error(f"Failed to get workers for block: {e}")
             worker_tuples = []
 
-        w1_name, w2_name, w3_name = "Unknown", "Unknown", "Unknown"
-        worker1_id, worker2_id, worker3_id = None, None, None
-        
-        # Find worker IDs using robust lookup
-        if len(worker_tuples) > 0:
-            w1_name = worker_tuples[0][0]
-            u1 = await self._find_user_by_name_robust(w1_name)
-            if u1: worker1_id = u1.id
-            
-        if len(worker_tuples) > 1:
-            w2_name = worker_tuples[1][0]
-            u2 = await self._find_user_by_name_robust(u2_name)
-            if u2: worker2_id = u2.id
-            
-        if len(worker_tuples) > 2:
-            w3_name = worker_tuples[2][0]
-            u3 = await self._find_user_by_name_robust(w3_name)
-            if u3: worker3_id = u3.id
+        w1_id, w2_id, w3_id, w1_n, w2_n, w3_n = await self._get_workers_from_tuples(worker_tuples)
 
-        # 5. Create Session
-        # Session start_time is set to deadline (when power returns)
-        # This ensures workers are notified during power-ON period
-        # when they can actually refuel generators
+        # Create Session
         session = await self.repo.create_session(
-            start_time=deadline,  # Workers notified when power returns
+            start_time=deadline,  # Notified at power return
             deadline=deadline,
-            worker1_id=worker1_id,
-            worker2_id=worker2_id,
-            worker3_id=worker3_id
+            worker1_id=w1_id,
+            worker2_id=w2_id,
+            worker3_id=w3_id
         )
         
-        # 6. Notify
+        # Notify
         if self.notifier:
-            # Create clickable tags
-            t1 = self._get_worker_tag(worker1_id, w1_name)
-            t2 = self._get_worker_tag(worker2_id, w2_name)
-            t3 = self._get_worker_tag(worker3_id, w3_name)
+            t1 = self._get_worker_tag(w1_id, w1_n)
+            t2 = self._get_worker_tag(w2_id, w2_n)
+            t3 = self._get_worker_tag(w3_id, w3_n)
             
-            worker_tags_str = ", ".join([t for t in [t1, t2, t3] if "Unknown" not in t])
-            if not worker_tags_str: worker_tags_str = "Unknown"
+            worker_tags = ", ".join([t for t in [t1, t2, t3] if "Unknown" not in t]) or "Unknown"
 
-            # Formatting dates for humans
             def fmt_dt(dt):
                 if dt.date() == now.date(): return dt.strftime('%H:%M')
                 return dt.strftime('%d.%m %H:%M')
 
             msg = f"⚡ <b>Світло з'явилося!</b>\n\n" \
                   f"⏰ Період відключення: {fmt_dt(block_start)} - {fmt_dt(deadline)}\n" \
-                  f"👷 На зміні були: {worker_tags_str}\n\n" \
+                  f"👷 На зміні були: {worker_tags}\n\n" \
                   f"Будь ласка, заправте генератор(и) та завершіть сесію."
             
             from bot.keyboards.session_kb import get_start_session_kb
             kb = get_start_session_kb(session.id)
             
-            if worker1_id: await self.notifier.notify_user(worker1_id, msg, reply_markup=kb)
-            if worker2_id: await self.notifier.notify_user(worker2_id, msg, reply_markup=kb)
-            if worker3_id: await self.notifier.notify_user(worker3_id, msg, reply_markup=kb)
+            if w1_id: await self.notifier.notify_user(w1_id, msg, reply_markup=kb)
+            if w2_id: await self.notifier.notify_user(w2_id, msg, reply_markup=kb)
+            if w3_id: await self.notifier.notify_user(w3_id, msg, reply_markup=kb)
 
             admin_msg = f"🚀 <b>Створено сесію заправки</b> (ID: {session.id})\n" \
                         f"⏰ Період: {fmt_dt(block_start)} - {fmt_dt(deadline)}\n" \
-                        f"👷 Воркери: {worker_tags_str}\n"
+                        f"👷 Воркери: {worker_tags}\n"
             
-            if not worker1_id and not worker2_id and not worker3_id:
-                admin_msg += "❌ <b>Помилка:</b> Воркерів не знайдено в базі!"
-            
+            if not any([w1_id, w2_id, w3_id]): admin_msg += "❌ <b>Помилка:</b> Воркерів не знайдено!"
             await self.notifier.notify_admins(admin_msg)
             
         return session
+
+    async def _get_workers_from_tuples(self, worker_tuples):
+        """Helper to lookup IDs for worker name tuples"""
+        w1_n, w2_n, w3_n = "Unknown", "Unknown", "Unknown"
+        w1_id, w2_id, w3_id = None, None, None
+        
+        if len(worker_tuples) > 0:
+            w1_n = worker_tuples[0][0]
+            u1 = await self._find_user_by_name_robust(w1_n)
+            if u1: w1_id = u1.id
+            
+        if len(worker_tuples) > 1:
+            w2_n = worker_tuples[1][0]
+            u2 = await self._find_user_by_name_robust(w2_n)
+            if u2: w2_id = u2.id
+            
+        if len(worker_tuples) > 2:
+            w3_n = worker_tuples[2][0]
+            u3 = await self._find_user_by_name_robust(w3_n)
+            if u3: w3_id = u3.id
+            
+        return w1_id, w2_id, w3_id, w1_n, w2_n, w3_n
 
     def _get_worker_tag(self, worker_id: int | None, name: str) -> str:
         """Helper to create HTML mention if ID is available, else just bold name"""

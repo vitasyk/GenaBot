@@ -135,8 +135,8 @@ def start_scheduler(bot: Bot):
     scheduler.add_job(weather_check_job, CronTrigger(hour=8, minute=0), args=[bot])
     
     # Check Power Outage (Dynamic Interval)
-    # Default 15 min
-    interval_minutes = 15
+    # Default 1 min for near-real-time reactive notifications
+    interval_minutes = 1
     
     try:
         # Try to read from Redis synchronously? 

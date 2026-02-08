@@ -25,8 +25,8 @@ def get_schedule_menu_kb() -> ReplyKeyboardMarkup:
     """Schedule management submenu"""
     keyboard = [
         [KeyboardButton(text="✏️ Ввести вручну"), KeyboardButton(text="🌐 Завантажити з HOE")],
-        [KeyboardButton(text="📋 Переглянути графік"), KeyboardButton(text="🗑️ Очистити графік")],
-        [KeyboardButton(text="🔙 Головне меню")]
+        [KeyboardButton(text="📸 Розпізнати з фото"), KeyboardButton(text="📋 Переглянути графік")],
+        [KeyboardButton(text="🗑️ Очистити графік"), KeyboardButton(text="🔙 Головне меню")]
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 

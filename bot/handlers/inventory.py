@@ -1,5 +1,7 @@
 from aiogram import Router, F, types
 import logging
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import InlineKeyboardButton
 from bot.database.models import UserRole, GenStatus
 from bot.database.repositories.user import UserRepository
 from bot.keyboards.refuel_kb import get_refuel_kb, get_amount_kb
@@ -22,19 +24,26 @@ async def check_stock(message: types.Message, inventory_service: InventoryServic
     stock_cans = stats["stock_cans"]
     last_refill = stats["last_refill_date"]
     avg_h = stats["avg_hourly_consumption"]
+    total_w = stats["total_weekly_consumption"]
     hours_left = stats["hours_left"]
     
     text = "📦 <b>Склад палива</b>\n"
     text += "➖➖➖➖➖➖➖➖➖➖\n"
-    text += f"🛒 Каністри: <b>{stock_cans:.2f}</b> шт.\n"
+    text += f"🛒 Залишок: <b>{stock_cans:.2f}</b> каністр\n"
     text += f"💧 Обсяг: {stock_liters} літрів\n\n"
     
     if last_refill:
         text += f"📅 Останнє поповнення: {last_refill.strftime('%d.%m.%Y')}\n"
     
     if avg_h > 0.001:
-        text += f"📉 Середня витрата: ~<b>{avg_h:.2f}</b> л/год\n"
-        text += f"⏳ Вистачить на: ~<b>{hours_left:.1f}</b> год\n"
+        days_left = hours_left / 24.0
+        text += f"📉 Витрачено за 7 днів: <b>{total_w:.1f}</b> л\n"
+        text += f"📊 Сер. витрата (доба): <b>{stats['avg_daily_consumption']:.1f}</b> л\n"
+        text += f"📊 Сер. витрата: ~<b>{avg_h:.2f}</b> л/год ⏳\n"
+        text += f" Вистачить на: ~<b>{hours_left:.1f}</b> год"
+        if days_left >= 1.0:
+            text += f" (≈{days_left:.1f} дн.)"
+        text += "\n"
     else:
         text += "📉 Витрата: Немає даних (останні 7 днів)\n"
         
@@ -43,10 +52,90 @@ async def check_stock(message: types.Message, inventory_service: InventoryServic
 
 @router.callback_query(F.data == "stock_close")
 async def stock_close_callback(callback: types.CallbackQuery):
-    await callback.message.delete()
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
     await callback.answer()
 
-@router.callback_query(F.data.startswith("stock_"))
+@router.callback_query(F.data == "stock_correct_date")
+async def stock_date_selector_callback(callback: types.CallbackQuery, user_repo: UserRepository):
+    user = await user_repo.get_by_id(callback.from_user.id)
+    if not user or user.role != UserRole.admin:
+        await callback.answer("⛔ Тільки для адміністраторів", show_alert=True)
+        return
+
+    # Generate dates for the last 7 days
+    from datetime import datetime, timedelta
+    builder = InlineKeyboardBuilder()
+    now = datetime.now()
+    
+    # 2 rows of 4 buttons
+    for i in range(7):
+        dt = now - timedelta(days=i)
+        label = "Сьогодні" if i == 0 else "Вчора" if i == 1 else dt.strftime("%d.%m")
+        builder.add(InlineKeyboardButton(text=label, callback_data=f"stock_set_date_{dt.strftime('%Y-%m-%d')}"))
+    
+    builder.adjust(4)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="stock_back_to_main"))
+
+    await callback.message.edit_text(
+        "📅 <b>Корегування дати поповнення</b>\n"
+        "Оберіть дату останнього надходження палива (ADD_FUEL):",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "stock_back_to_main")
+async def stock_back_handler(callback: types.CallbackQuery, inventory_service: InventoryService, user_repo: UserRepository):
+    # Reuse check_stock logic but via edit_text
+    user = await user_repo.get_by_id(callback.from_user.id)
+    is_admin = user and user.role == UserRole.admin
+    stats = await inventory_service.get_detailed_stats()
+    
+
+    text = "📦 <b>Склад палива</b>\n"
+    text += "➖➖➖➖➖➖➖➖➖➖\n"
+    text += f"🛒 Залишок: <b>{stats['stock_cans']:.2f}</b> каністр\n"
+    text += f"💧 Обсяг: {stats['stock_liters']} літрів\n\n"
+    
+    if stats["last_refill_date"]:
+        text += f"📅 Останнє поповнення: {stats['last_refill_date'].strftime('%d.%m.%Y')}\n"
+    
+    if stats["avg_hourly_consumption"] > 0.001:
+        hours_left = stats['hours_left']
+        days_left = hours_left / 24.0
+        text += f"📉 Витрачено за 7 днів: <b>{stats['total_weekly_consumption']:.1f}</b> л\n"
+        text += f"📊 Сер. витрата (доба): <b>{stats['avg_daily_consumption']:.1f}</b> л\n"
+        text += f"📊 Сер. витрата: ~<b>{stats['avg_hourly_consumption']:.2f}</b> л/год ⏳\n"
+        text += f" Вистачить на: ~<b>{hours_left:.1f}</b> год"
+        if days_left >= 1.0:
+            text += f" (≈{days_left:.1f} дн.)"
+        text += "\n"
+    else:
+        text += "📉 Витрата: Немає даних (останні 7 днів)\n"
+        
+    text += "➖➖➖➖➖➖➖➖➖➖"
+    await callback.message.edit_text(text, reply_markup=get_inventory_kb(is_admin), parse_mode="HTML")
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("stock_set_date_"))
+async def stock_process_date_callback(callback: types.CallbackQuery, inventory_service: InventoryService, user_repo: UserRepository):
+    date_str = callback.data.replace("stock_set_date_", "")
+    from datetime import datetime
+    new_date = datetime.strptime(date_str, "%Y-%m-%d")
+    
+    success = await inventory_service.update_last_refill_date(callback.from_user.id, new_date)
+    
+    if success:
+        await callback.answer(f"✅ Дату змінено на {new_date.strftime('%d.%m')}")
+        # Return to main inventory view
+        await stock_back_handler(callback, inventory_service, user_repo)
+    else:
+        await callback.answer("❌ Помилка: лог поповнення не знайдено", show_alert=True)
+
+@router.callback_query(F.data.in_({"stock_add_1", "stock_add_5", "stock_dec_1"}))
 async def stock_control_callback(callback: types.CallbackQuery, inventory_service: InventoryService, user_repo: UserRepository):
     user = await user_repo.get_by_id(callback.from_user.id)
     if not user or user.role != UserRole.admin:
@@ -68,17 +157,25 @@ async def stock_control_callback(callback: types.CallbackQuery, inventory_servic
 
     stats = await inventory_service.get_detailed_stats()
     
+
     text = "📦 <b>Склад палива</b>\n"
     text += "➖➖➖➖➖➖➖➖➖➖\n"
-    text += f"🛒 Каністри: <b>{stats['stock_cans']:.2f}</b> шт.\n"
+    text += f"🛒 Залишок: <b>{stats['stock_cans']:.2f}</b> каністр\n"
     text += f"💧 Обсяг: {stats['stock_liters']} літрів\n\n"
     
     if stats["last_refill_date"]:
         text += f"📅 Останнє поповнення: {stats['last_refill_date'].strftime('%d.%m.%Y')}\n"
     
     if stats["avg_hourly_consumption"] > 0.001:
-        text += f"📉 Середня витрата: ~<b>{stats['avg_hourly_consumption']:.2f}</b> л/год\n"
-        text += f"⏳ Вистачить на: ~<b>{stats['hours_left']:.1f}</b> год\n"
+        hours_left = stats['hours_left']
+        days_left = hours_left / 24.0
+        text += f"📉 Витрачено за 7 днів: <b>{stats['total_weekly_consumption']:.1f}</b> л\n"
+        text += f"📊 Сер. витрата (доба): <b>{stats['avg_daily_consumption']:.1f}</b> л\n"
+        text += f"📊 Сер. витрата: ~<b>{stats['avg_hourly_consumption']:.2f}</b> л/год ⏳\n"
+        text += f" Вистачить на: ~<b>{hours_left:.1f}</b> год"
+        if days_left >= 1.0:
+            text += f" (≈{days_left:.1f} дн.)"
+        text += "\n"
         
     text += "➖➖➖➖➖➖➖➖➖➖"
 
@@ -193,6 +290,7 @@ async def process_antigel_reset(callback: types.CallbackQuery, generator_service
         )
     
     await callback.answer("Дані оновлено!")
+
 
 @router.callback_query(F.data == "fuel_back")
 async def back_to_gen_select(callback: types.CallbackQuery):

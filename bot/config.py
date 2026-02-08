@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     HOE_SCHEDULE_URL: str = "https://hoe.com.ua/page/pogodinni-vidkljuchennja"
     QUEUE_NUMBER: str = "1.1"  # Which queue to monitor
     
+    # Slack
+    SLACK_WEBHOOK_URL: SecretStr | None = None
+    FUEL_THRESHOLD_CANS: float = 2.0
+    
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 config = Settings()

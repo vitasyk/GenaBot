@@ -40,6 +40,12 @@ class SessionRepository:
     async def get_session_by_id(self, session_id: int) -> Optional[RefuelSession]:
         return await self.session.get(RefuelSession, session_id)
         
+    async def exists_by_deadline(self, deadline: datetime) -> bool:
+        """Check if a session with this exact deadline already exists"""
+        stmt = select(RefuelSession).where(RefuelSession.deadline == deadline)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none() is not None
+        
     async def update_status(self, session_id: int, status: SessionStatus) -> Optional[RefuelSession]:
         stmt = update(RefuelSession).where(RefuelSession.id == session_id).values(status=status)
         await self.session.execute(stmt)

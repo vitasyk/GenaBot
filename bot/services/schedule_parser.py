@@ -9,12 +9,44 @@ from bot.config import config
 import ssl
 import certifi
 
+import os
+
 class ScheduleParser:
     """Parses power outage schedules from HOE.com.ua images"""
     
+    CACHE_DIR = "data/cache"
+    
     def __init__(self):
         self.last_image_url = None
-        
+        # Ensure cache directory exists
+        if not os.path.exists(self.CACHE_DIR):
+            os.makedirs(self.CACHE_DIR, exist_ok=True)
+            
+    def _get_cache_path(self, suffix: str) -> str:
+        """Get path for a specific cache slot (today/tomorrow)"""
+        return f"{self.CACHE_DIR}/schedule_{suffix}.png"
+
+    def _save_to_cache(self, image_bytes: bytes, suffix: str = "today"):
+        """Save image bytes to local cache slot"""
+        try:
+            path = self._get_cache_path(suffix)
+            with open(path, "wb") as f:
+                f.write(image_bytes)
+            logging.info(f"Schedule image saved to cache ({suffix}): {path}")
+        except Exception as e:
+            logging.error(f"Failed to save schedule to cache: {e}")
+
+    def get_cached_schedule(self, suffix: str = "today") -> Optional[bytes]:
+        """Retrieve cached schedule from specific slot"""
+        path = self._get_cache_path(suffix)
+        if os.path.exists(path):
+            try:
+                with open(path, "rb") as f:
+                    return f.read()
+            except Exception as e:
+                logging.error(f"Failed to read schedule from cache ({suffix}): {e}")
+        return None
+
     async def _fetch_available_schedules(self) -> List[tuple[datetime, bytes]]:
         """Scrape site to find and download schedules for today and tomorrow"""
         try:
@@ -22,7 +54,8 @@ class ScheduleParser:
             connector = aiohttp.TCPConnector(ssl=ssl_context)
             
             schedules = []
-            async with aiohttp.ClientSession(connector=connector) as session:
+            timeout = aiohttp.ClientTimeout(total=20, connect=10)
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
                 async with session.get(config.HOE_SCHEDULE_URL) as response:
                     if response.status != 200:
                         logging.error(f"Failed to load HOE page: {response.status}")
@@ -74,6 +107,10 @@ class ScheduleParser:
                                     if img_resp.status == 200:
                                         img_bytes = await img_resp.read()
                                         found_data[d_obj] = (full_url, img_bytes)
+                                        # Save to cache with correct slot
+                                        suffix = "today" if d_obj == today else "tomorrow"
+                                        self._save_to_cache(img_bytes, suffix)
+                                        
                                         self.last_image_url = full_url
                                         logging.info(f"Fetched schedule for {d_obj} (by Alt): {full_url}")
                                         assigned = True
@@ -92,6 +129,10 @@ class ScheduleParser:
                                 if img_resp.status == 200:
                                     img_bytes = await img_resp.read()
                                     found_data[d_obj] = (full_url, img_bytes)
+                                    # Save to cache with correct slot
+                                    suffix = "today" if d_obj == today else "tomorrow"
+                                    self._save_to_cache(img_bytes, suffix)
+                                    
                                     self.last_image_url = full_url
                                     logging.info(f"Fetched schedule for {d_obj} (by URL): {full_url}")
                                     assigned = True
@@ -111,7 +152,9 @@ class ScheduleParser:
                         async with session.get(full_url) as img_resp:
                             if img_resp.status == 200:
                                 logging.info(f"Fallback: Fetching first available image {full_url}")
-                                schedules.append((datetime.combine(today, time.min), await img_resp.read()))
+                                img_bytes = await img_resp.read()
+                                self._save_to_cache(img_bytes, "today")
+                                schedules.append((datetime.combine(today, time.min), img_bytes))
 
             return schedules
         except Exception as e:

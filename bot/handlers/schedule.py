@@ -139,6 +139,25 @@ async def download_from_hoe_visual(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
 
+@router.message(F.text == "📸 Розпізнати з фото")
+async def start_photo_recognition(message: Message, state: FSMContext):
+    """Prompt for schedule screenshot"""
+    await state.set_state(ScheduleStates.waiting_for_screenshot)
+    
+    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+    cancel_kb = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="🔙 Скасувати")]],
+        resize_keyboard=True
+    )
+    
+    await message.answer(
+        "📸 <b>Розпізнавання графіку з фото</b>\n\n"
+        "Надішліть скріншот офіційного графіку HOE (черга 1.1).\n"
+        "Бот спробує автоматично визначити періоди відключень.",
+        reply_markup=cancel_kb,
+        parse_mode="HTML"
+    )
+
 @router.callback_query(F.data.in_({"hoe_today", "hoe_tomorrow"}))
 async def process_hoe_download_callback(callback: CallbackQuery):
     """Handle HOE download selection"""
@@ -148,11 +167,13 @@ async def process_hoe_download_callback(callback: CallbackQuery):
     
     label = "сьогодні" if target == "hoe_today" else "завтра"
     
+    await callback.answer() # Answer immediately to prevent Telegram timeout
     await callback.message.edit_text(f"🔍 <b>Шукаю графік на {label}...</b>", parse_mode="HTML")
     
     try:
         # Fetch data: returns List[(date, List[hours], bytes)]
-        results = await parser.get_schedules_data(queue="1.1")
+        import asyncio
+        results = await asyncio.wait_for(parser.get_schedules_data(queue="1.1"), timeout=30.0)
         
         # Filter for target date
         found = None
@@ -183,11 +204,98 @@ async def process_hoe_download_callback(callback: CallbackQuery):
                 parse_mode="HTML"
             )
             
+    except asyncio.TimeoutError:
+        logging.error("HOE download timed out (30s)")
+        
+        # Fallback to cache
+        suffix = "today" if target == "hoe_today" else "tomorrow"
+        cached_img = parser.get_cached_schedule(suffix=suffix)
+        if cached_img:
+            photo = BufferedInputFile(cached_img, filename=f"cached_schedule_{suffix}.png")
+            await callback.message.delete()
+            await callback.message.answer_photo(
+                photo=photo,
+                caption=f"⚠️ <b>Сайт HOE недоступний (таймаут)</b>\n\n"
+                        f"Показую <b>останній завантажений</b> графік на {label}.\n"
+                        "<i>Він може бути неактуальним!</i>",
+                parse_mode="HTML"
+            )
+        else:
+            await callback.message.edit_text(
+                "⏳ <b>Сервер HOE занадто довго не відповідає</b>\n\n"
+                "Спробуйте пізніше або завантажте графік вручну.",
+                parse_mode="HTML"
+            )
     except Exception as e:
         logging.error(f"HOE image fetch failed: {e}")
-        await callback.message.edit_text(f"❌ <b>Помилка завантаження</b>: {str(e)}", parse_mode="HTML")
+        
+        # Fallback to cache
+        suffix = "today" if target == "hoe_today" else "tomorrow"
+        cached_img = parser.get_cached_schedule(suffix=suffix)
+        if cached_img:
+            photo = BufferedInputFile(cached_img, filename=f"cached_schedule_{suffix}.png")
+            await callback.message.delete()
+            await callback.message.answer_photo(
+                photo=photo,
+                caption=f"❌ <b>Помилка завантаження</b>: {str(e)}\n\n"
+                        f"Показую <b>останній завантажений</b> графік на {label}.",
+                parse_mode="HTML"
+            )
+        else:
+            await callback.message.edit_text(f"❌ <b>Помилка завантаження</b>: {str(e)}", parse_mode="HTML")
+
+@router.message(ScheduleStates.waiting_for_screenshot, F.photo | F.document)
+async def process_schedule_screenshot(message: Message, state: FSMContext):
+    """Process uploaded screenshot using ScheduleParser"""
+    # Get photo bytes
+    if message.photo:
+        file_id = message.photo[-1].file_id
+    elif message.document and message.document.mime_type.startswith("image/"):
+        file_id = message.document.file_id
+    else:
+        await message.answer("⚠️ Будь ласка, надішліть зображення (скріншот).")
+        return
+
+    await message.answer("🔍 <b>Аналізую зображення...</b>", parse_mode="HTML")
     
-    await callback.answer()
+    try:
+        file = await message.bot.get_file(file_id)
+        from io import BytesIO
+        file_io = BytesIO()
+        await message.bot.download_file(file.file_path, file_io)
+        img_bytes = file_io.getvalue()
+        
+        hours = parser.parse_image(img_bytes, queue="1.1")
+        
+        if not hours:
+            await message.answer(
+                "❌ <b>Не вдалося розпізнати графік</b>\n\n"
+                "Переконайтеся, що на фото чітко видно таблицю HOE.\n"
+                "Спробуйте надіслати інше фото або введіть дані вручну.",
+                reply_markup=get_schedule_menu_kb(),
+                parse_mode="HTML"
+            )
+            await state.clear()
+            return
+
+        # Convert hours to ranges
+        ranges = _hours_to_ranges(hours)
+        await state.update_data(periods=ranges)
+        
+        # Now ask for date
+        await state.set_state(ScheduleStates.waiting_for_date)
+        await message.answer(
+            f"✅ <b>Графік розпізнано!</b>\n\n"
+            f"Виявлено періоди:\n" + "\n".join([f"• {s:02d}:00 - {e:02d}:00" for s, e in ranges]) + "\n\n"
+            f"📅 <b>Для якого дня встановити цей графік?</b>",
+            reply_markup=get_date_quick_kb(),
+            parse_mode="HTML"
+        )
+        
+    except Exception as e:
+        logging.error(f"Manual photo parsing failed: {e}")
+        await message.answer(f"❌ <b>Помилка аналізу</b>: {str(e)}", parse_mode="HTML")
+        await state.clear()
 
 # Manual Entry State Handlers (Must be AFTER specific button handlers)
 @router.message(ScheduleStates.waiting_for_date)

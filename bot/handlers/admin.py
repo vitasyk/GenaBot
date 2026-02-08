@@ -8,7 +8,8 @@ from bot.database.models import UserRole
 from bot.database.repositories.user import UserRepository
 from bot.database.repositories.logs import LogRepository
 from bot.config import config
-from bot.states import AdminStates
+from bot.states import AdminStates, SlackStates
+from bot.services.slack import SlackService
 
 router = Router()
 
@@ -30,11 +31,12 @@ def _get_admin_panel_kb():
     builder.add(InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_force_schedule"))
     builder.add(InlineKeyboardButton(text="⏱️ Інтервал", callback_data="admin_set_interval"))
     
-    # Rows 4-5: System
+    # Rows 4-5: System & Slack
+    builder.add(InlineKeyboardButton(text="⚙️ Slack", callback_data="admin_slack_menu"))
     builder.add(InlineKeyboardButton(text="🧹 Скинути історію", callback_data="admin_confirm_reset_logs"))
     builder.add(InlineKeyboardButton(text="❌ Закрити", callback_data="admin_close"))
     
-    builder.adjust(2, 2, 2, 1, 1)
+    builder.adjust(2, 2, 2, 2, 1)
     return builder.as_markup()
 
 # --- Session Management Handlers ---
@@ -431,3 +433,111 @@ async def admin_perform_delete_all_sessions(callback: types.CallbackQuery, bot: 
     
     await callback.answer(f"🗑️ Видалено сесій: {count}", show_alert=True)
     await admin_sessions_list(callback, bot)
+
+# --- Slack Management Handlers ---
+
+def _get_slack_kb():
+    """Keyboard for Slack configuration menu"""
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="📊 Поріг палива", callback_data="slack_set_threshold"))
+    builder.row(InlineKeyboardButton(text="✉️ Надіслати повідомлення", callback_data="slack_send_custom"))
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel_back"))
+    return builder.as_markup()
+
+@router.callback_query(F.data == "admin_slack_menu")
+async def admin_slack_menu(callback: types.CallbackQuery):
+    """Show Slack configuration options"""
+    current_threshold = config.FUEL_THRESHOLD_CANS
+    webhook_status = "✅ Налаштовано" if config.SLACK_WEBHOOK_URL else "❌ Не налаштовано"
+    
+    text = (
+        "⚙️ <b>Slack Налаштування</b>\n\n"
+        f"🔗 Webhook: {webhook_status}\n"
+        f"📊 Поріг палива: <b>{current_threshold}</b> каністр\n\n"
+        "Оберіть дію:"
+    )
+    
+    await callback.message.edit_text(text, reply_markup=_get_slack_kb(), parse_mode="HTML")
+    await callback.answer()
+
+@router.callback_query(F.data == "slack_set_threshold")
+async def slack_set_threshold(callback: types.CallbackQuery, state: FSMContext):
+    """Prompt for new threshold value"""
+    await state.set_state(SlackStates.waiting_for_threshold)
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔙 Скасувати", callback_data="admin_slack_menu"))
+    
+    await callback.message.edit_text(
+        "📊 <b>Налаштування порогу палива</b>\n\n"
+        f"Поточний поріг: <b>{config.FUEL_THRESHOLD_CANS}</b> каністр\n\n"
+        "Введіть нове значення (наприклад: 3.5):",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@router.message(SlackStates.waiting_for_threshold)
+async def slack_threshold_input(message: types.Message, state: FSMContext):
+    """Process threshold input"""
+    try:
+        new_threshold = float(message.text.strip().replace(",", "."))
+        
+        if new_threshold < 0 or new_threshold > 100:
+            await message.answer("⚠️ Введіть значення від 0 до 100 каністр.")
+            return
+        
+        # Update configuration (runtime)
+        config.FUEL_THRESHOLD_CANS = new_threshold
+        
+        await state.clear()
+        await message.answer(
+            f"✅ <b>Поріг оновлено!</b>\n\n"
+            f"Новий поріг: <b>{new_threshold}</b> каністр\n\n"
+            f"<i>Примітка: для збереження після перезапуску додайте в .env:\n"
+            f"FUEL_THRESHOLD_CANS={new_threshold}</i>",
+            reply_markup=_get_slack_kb(),
+            parse_mode="HTML"
+        )
+    except ValueError:
+        await message.answer("⚠️ Введіть коректне число (наприклад: 2.5)")
+
+@router.callback_query(F.data == "slack_send_custom")
+async def slack_send_custom(callback: types.CallbackQuery, state: FSMContext):
+    """Prompt for custom message"""
+    if not config.SLACK_WEBHOOK_URL:
+        await callback.answer("❌ Slack Webhook не налаштовано у .env", show_alert=True)
+        return
+    
+    await state.set_state(SlackStates.waiting_for_message)
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔙 Скасувати", callback_data="admin_slack_menu"))
+    
+    await callback.message.edit_text(
+        "✉️ <b>Надіслати повідомлення в Slack</b>\n\n"
+        "Введіть текст повідомлення:",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@router.message(SlackStates.waiting_for_message)
+async def slack_message_input(message: types.Message, state: FSMContext):
+    """Send custom message to Slack"""
+    text = message.text.strip()
+    
+    if not text:
+        await message.answer("⚠️ Повідомлення не може бути порожнім.")
+        return
+    
+    slack_service = SlackService(config.SLACK_WEBHOOK_URL)
+    await slack_service.send_message(text)
+    
+    await state.clear()
+    await message.answer(
+        f"✅ <b>Повідомлення надіслано!</b>\n\n"
+        f"Текст: <i>{html.escape(text)}</i>",
+        reply_markup=_get_slack_kb(),
+        parse_mode="HTML"
+    )
