@@ -12,39 +12,26 @@ class UserRepository(BaseRepository[User]):
     async def create_or_update(self, user_id: int, name: str, role: UserRole = UserRole.worker) -> User:
         # Check against config
         from bot.config import config
-        if user_id in config.ADMIN_IDS:
-            role = UserRole.admin
         
-        # Access Control Logic
+        # Determine target role based on config (Authoritative source)
+        if user_id in config.ADMIN_IDS:
+            target_role = UserRole.admin
         elif config.RESTRICT_ACCESS:
             if user_id in config.ALLOWED_IDS:
-                role = UserRole.worker
+                target_role = UserRole.worker
             else:
-                role = UserRole.blocked
+                target_role = UserRole.blocked
         else:
              # Public access enabled
-             role = UserRole.worker
+             target_role = UserRole.worker
             
         user = await self.get_by_id(user_id)
         if not user:
-            user = User(id=user_id, name=name, role=role)
+            user = User(id=user_id, name=name, role=target_role)
             self.session.add(user)
         else:
             user.name = name
-            # Update role dynamically
-            if user_id in config.ADMIN_IDS:
-                user.role = UserRole.admin
-            elif config.RESTRICT_ACCESS:
-                # Demote if not allowed anymore and not admin
-                if user_id not in config.ALLOWED_IDS and user.role != UserRole.admin:
-                    user.role = UserRole.blocked
-                # Promote to worker if added to allowed and was blocked
-                elif user_id in config.ALLOWED_IDS and user.role == UserRole.blocked:
-                    user.role = UserRole.worker
-            else:
-                # If public, unblock blocked users
-                if user.role == UserRole.blocked:
-                    user.role = UserRole.worker
+            user.role = target_role # Force update to match current config
 
         return user
     

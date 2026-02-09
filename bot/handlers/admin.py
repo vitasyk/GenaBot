@@ -1,4 +1,5 @@
 from aiogram import Router, F, types, Bot
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 import html
@@ -26,6 +27,8 @@ def _get_admin_panel_kb():
     # Row 2: Management
     builder.add(InlineKeyboardButton(text="⛽ Сесії", callback_data="admin_sessions"))
     builder.add(InlineKeyboardButton(text="👥 Юзери", callback_data="admin_users"))
+    builder.add(InlineKeyboardButton(text="📋 Працівники", callback_data="admin_sheets_workers"))
+    builder.add(InlineKeyboardButton(text="👷 Воркери", callback_data="admin_next_workers"))
     
     # Row 3: Schedule
     builder.add(InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_force_schedule"))
@@ -37,7 +40,7 @@ def _get_admin_panel_kb():
     builder.add(InlineKeyboardButton(text="🧹 Скинути історію", callback_data="admin_confirm_reset_logs"))
     builder.add(InlineKeyboardButton(text="❌ Закрити", callback_data="admin_close"))
     
-    builder.adjust(2, 2, 2, 3, 1)
+    builder.adjust(2, 4, 2, 3, 1)
     return builder.as_markup()
 
 # --- Session Management Handlers ---
@@ -247,6 +250,143 @@ async def admin_users_list(callback: types.CallbackQuery, user_repo: UserReposit
         parse_mode="HTML"
     )
 
+@router.callback_query(F.data == "admin_sheets_workers")
+async def admin_sheets_workers_list(callback: types.CallbackQuery, user_repo: UserRepository):
+    from bot.services.google_sheets import GoogleSheetsService
+    sheets_service = GoogleSheetsService()
+    
+    # 1. Get all names from Sheets (Rows 39-60)
+    try:
+        sheet_names = sheets_service.get_all_worker_names()
+    except Exception as e:
+        await callback.answer(f"❌ Помилка Google Sheets: {str(e)}", show_alert=True)
+        return
+
+    # 2. Get all registered users to check mapping
+    users = await user_repo.get_all(include_blocked=True)
+    registered_mapped_names = {u.sheet_name for u in users if u.sheet_name}
+    
+    # 3. Format list
+    text = "📋 <b>Працівники з Google Таблиці</b>\n"
+    text += f"<i>(Рядки 39-60, всього знайдено: {len(sheet_names)})</i>\n\n"
+    
+    if not sheet_names:
+        text += "❌ Працівників не знайдено за вказаним діапазоном."
+    else:
+        for name in sheet_names:
+            if name in registered_mapped_names:
+                text += f"✅ <b>{name}</b>\n"
+            else:
+                text += f"❌ {name}\n"
+        
+        text += "\n✅ — зареєстрований у боті\n"
+        text += "❌ — не знайдено (потрібна прив'язка у меню 'Користувачі')"
+
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_sheets_workers"))
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel_back"))
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            await callback.answer("Дані актуальні ✅")
+        else:
+            raise
+
+@router.callback_query(F.data == "admin_next_workers")
+async def admin_next_workers_handler(callback: types.CallbackQuery, bot: Bot):
+    from bot.database.main import session_maker
+    from bot.database.repositories.schedule import ScheduleRepository
+    from bot.services.google_sheets import GoogleSheetsService
+    from bot.database.repositories.user import UserRepository
+    import zoneinfo
+    from datetime import datetime, date, time, timedelta
+
+    tz = zoneinfo.ZoneInfo(config.TIMEZONE)
+    now = datetime.now(tz)
+    
+    async with session_maker() as session:
+        sched_repo = ScheduleRepository(session)
+        sheets_service = GoogleSheetsService()
+        user_repo = UserRepository(session)
+        
+        # 1. Get schedule entries for today and tomorrow
+        entries = await sched_repo.get_all_for_date_range(now.date(), now.date() + timedelta(days=1))
+        
+        if not entries:
+            await callback.message.edit_text(
+                "📅 <b>Графік порожній</b>\nЗавантажте графік відключень, щоб побачити воркерів.",
+                reply_markup=InlineKeyboardBuilder().row(InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel_back")).as_markup(),
+                parse_mode="HTML"
+            )
+            return
+
+        # 2. Find next power-on moment
+        # Power return is at (end_hour):00
+        all_slots = []
+        for e in entries:
+            for h in range(e.start_hour, e.end_hour):
+                all_slots.append(datetime.combine(e.date, time(h % 24, 0)))
+        
+        all_slots = sorted(list(set(all_slots)))
+        
+        potential_returns = []
+        if all_slots:
+            current_block_end = all_slots[0] + timedelta(hours=1)
+            for i in range(1, len(all_slots)):
+                if all_slots[i] == current_block_end:
+                    current_block_end = all_slots[i] + timedelta(hours=1)
+                else:
+                    potential_returns.append(current_block_end)
+                    current_block_end = all_slots[i] + timedelta(hours=1)
+            potential_returns.append(current_block_end)
+
+        next_rt = None
+        for rt in sorted(potential_returns):
+            if rt.replace(tzinfo=tz) > now:
+                next_rt = rt
+                break
+        
+        if not next_rt:
+            await callback.message.edit_text(
+                "👀 <b>Наступних заправок не знайдено</b>\nНа найближчий час відключень не заплановано.",
+                reply_markup=InlineKeyboardBuilder().row(InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel_back")).as_markup(),
+                parse_mode="HTML"
+            )
+            return
+
+        # 3. Get workers for that time from Sheets
+        lookup_dt = next_rt - timedelta(minutes=1)
+        worker_tuples = sheets_service.get_workers_for_outage(lookup_dt.hour, lookup_dt.date())
+        
+        text = f"👷 <b>Наступна заправка</b>\n"
+        text += f"⏰ Час відновлення: <code>{next_rt.strftime('%H:%M')}</code> ({next_rt.strftime('%d.%m')})\n\n"
+        text += "👥 <b>Чергові за графіком:</b>\n"
+        
+        if not worker_tuples:
+            text += "❓ Працівників у Google Таблиці не знайдено."
+        else:
+            for w_name, _ in worker_tuples:
+                user = await user_repo.get_by_sheet_name(w_name)
+                status = "✅" if user else "❌"
+                text += f"{status} {w_name}\n"
+            
+            text += "\n<i>✅ — отримає алерт</i>\n"
+            text += f"<i>🕒 Дані на {lookup_dt.strftime('%H:%M')}</i>"
+
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="🔄 Оновити", callback_data="admin_next_workers"))
+        builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel_back"))
+        
+        try:
+            await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        except TelegramBadRequest as e:
+            if "message is not modified" in str(e):
+                await callback.answer("Дані актуальні ✅")
+            else:
+                raise
+
 @router.callback_query(F.data.startswith("admin_user_view:"))
 async def admin_user_details(callback: types.CallbackQuery, user_repo: UserRepository):
     user_id = int(callback.data.split(":")[1])
@@ -395,7 +535,13 @@ async def admin_panel_back(callback: types.CallbackQuery):
     text += f"📢 <b>Сповіщення:</b> {'👥 Всім працівникам' if config.NOTIFY_WORKERS else '👮 Тільки адмінам'}\n"
     text += f"👥 <b>Білий список:</b> {len(config.ALLOWED_IDS)} ID\n"
     text += f"👑 <b>Адміни:</b> {len(config.ADMIN_IDS)} ID\n"
-    await callback.message.edit_text(text, reply_markup=_get_admin_panel_kb(), parse_mode="HTML")
+    try:
+        await callback.message.edit_text(text, reply_markup=_get_admin_panel_kb(), parse_mode="HTML")
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            await callback.answer("Панель оновлена")
+        else:
+            raise
 
 @router.callback_query(F.data == "admin_do_reset_logs")
 async def do_reset_logs(callback: types.CallbackQuery, log_repo: LogRepository):

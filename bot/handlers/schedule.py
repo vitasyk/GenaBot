@@ -25,12 +25,15 @@ parser = ScheduleParser()
 
 # Main Schedule Menu
 @router.message(F.text == "📉 Графік")
-async def schedule_menu(message: Message):
+async def schedule_menu(message: Message, user_repo: UserRepository):
     """Show schedule management submenu"""
+    from bot.config import config
+    is_admin = message.from_user.id in config.ADMIN_IDS
+    
     await message.answer(
         "📅 <b>Управління графіком відключень</b>\n\n"
         "Оберіть дію:",
-        reply_markup=get_schedule_menu_kb(),
+        reply_markup=get_schedule_menu_kb(is_admin=is_admin),
         parse_mode="HTML"
     )
 
@@ -38,9 +41,8 @@ async def schedule_menu(message: Message):
 async def back_to_main(message: Message, state: FSMContext, user_repo: UserRepository):
     """Return to main menu"""
     await state.clear()
-    # Get user to check if admin
-    user = await user_repo.get_by_id(message.from_user.id)
-    is_admin = user and user.role == "admin"
+    from bot.config import config
+    is_admin = message.from_user.id in config.ADMIN_IDS
     
     await message.answer(
         "🏠 Головне меню",
@@ -49,8 +51,13 @@ async def back_to_main(message: Message, state: FSMContext, user_repo: UserRepos
 
 # Manual Entry Flow
 @router.message(F.text == "✏️ Ввести вручну")
-async def start_manual_entry(message: Message, state: FSMContext):
-    """Start manual schedule entry"""
+async def start_manual_entry(message: Message, state: FSMContext, user_repo: UserRepository):
+    """Start manual schedule entry (admin only)"""
+    from bot.config import config
+    if message.from_user.id not in config.ADMIN_IDS:
+        await message.answer("⛔ Ця функція доступна тільки адміністраторам.")
+        return
+    
     await state.set_state(ScheduleStates.waiting_for_date)
     await message.answer(
         f"📅 <b>Введення графіку вручну</b>\n\n"
@@ -64,9 +71,13 @@ async def start_manual_entry(message: Message, state: FSMContext):
 
 # View Schedule
 @router.message(F.text == "📋 Переглянути графік")
-async def view_schedule(message: Message, schedule_repo: ScheduleRepository, state: FSMContext):
+async def view_schedule(message: Message, schedule_repo: ScheduleRepository, state: FSMContext, user_repo: UserRepository):
     """View current schedule"""
     await state.clear()
+    
+    from bot.config import config
+    is_admin = message.from_user.id in config.ADMIN_IDS
+    
     today = datetime.now().date()
     tomorrow = today + timedelta(days=1)
     
@@ -94,12 +105,17 @@ async def view_schedule(message: Message, schedule_repo: ScheduleRepository, sta
     else:
         response += f"<b>Завтра ({tomorrow.strftime('%d.%m.%Y')}):</b> графік не встановлено\n"
     
-    await message.answer(response, parse_mode="HTML", reply_markup=get_schedule_menu_kb())
+    await message.answer(response, parse_mode="HTML", reply_markup=get_schedule_menu_kb(is_admin=is_admin))
 
 # Clear Schedule
 @router.message(F.text == "🗑️ Очистити графік")
-async def clear_schedule_prompt(message: Message, state: FSMContext):
-    """Show confirmation for clearing schedule"""
+async def clear_schedule_prompt(message: Message, state: FSMContext, user_repo: UserRepository):
+    """Show confirmation for clearing schedule (admin only)"""
+    from bot.config import config
+    if message.from_user.id not in config.ADMIN_IDS:
+        await message.answer("⛔ Ця функція доступна тільки адміністраторам.")
+        return
+    
     await state.clear()
     await message.answer(
         "❓ <b>Ви впевнені, що хочете очистити графік на сьогодні?</b>\n\n"
@@ -140,8 +156,13 @@ async def download_from_hoe_visual(message: Message, state: FSMContext):
     )
 
 @router.message(F.text == "📸 Розпізнати з фото")
-async def start_photo_recognition(message: Message, state: FSMContext):
-    """Prompt for schedule screenshot"""
+async def start_photo_recognition(message: Message, state: FSMContext, user_repo: UserRepository):
+    """Prompt for schedule screenshot (admin only)"""
+    from bot.config import config
+    if message.from_user.id not in config.ADMIN_IDS:
+        await message.answer("⛔ Ця функція доступна тільки адміністраторам.")
+        return
+    
     await state.set_state(ScheduleStates.waiting_for_screenshot)
     
     from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
@@ -245,8 +266,10 @@ async def process_hoe_download_callback(callback: CallbackQuery):
             await callback.message.edit_text(f"❌ <b>Помилка завантаження</b>: {str(e)}", parse_mode="HTML")
 
 @router.message(ScheduleStates.waiting_for_screenshot, F.photo | F.document)
-async def process_schedule_screenshot(message: Message, state: FSMContext):
+async def process_schedule_screenshot(message: Message, state: FSMContext, user_repo: UserRepository):
     """Process uploaded screenshot using ScheduleParser"""
+    from bot.config import config
+    is_admin = message.from_user.id in config.ADMIN_IDS
     # Get photo bytes
     if message.photo:
         file_id = message.photo[-1].file_id
@@ -272,7 +295,7 @@ async def process_schedule_screenshot(message: Message, state: FSMContext):
                 "❌ <b>Не вдалося розпізнати графік</b>\n\n"
                 "Переконайтеся, що на фото чітко видно таблицю HOE.\n"
                 "Спробуйте надіслати інше фото або введіть дані вручну.",
-                reply_markup=get_schedule_menu_kb(),
+                reply_markup=get_schedule_menu_kb(is_admin=is_admin),
                 parse_mode="HTML"
             )
             await state.clear()
@@ -308,7 +331,9 @@ async def process_date_input(message: Message, state: FSMContext, user_repo: Use
     
     if message.text == "🔙 Скасувати":
         await state.clear()
-        await message.answer("❌ Скасовано", reply_markup=get_schedule_menu_kb())
+        from bot.config import config
+        is_admin = message.from_user.id in config.ADMIN_IDS
+        await message.answer("❌ Скасовано", reply_markup=get_schedule_menu_kb(is_admin=is_admin))
         return
         
     # Skip if user accidentally pressed another main menu button or command
@@ -397,7 +422,9 @@ async def process_periods_input(message: Message, state: FSMContext, schedule_re
     """Process time periods input"""
     if message.text == "🔙 Скасувати":
         await state.clear()
-        await message.answer("❌ Скасовано", reply_markup=get_schedule_menu_kb())
+        from bot.config import config
+        is_admin = message.from_user.id in config.ADMIN_IDS
+        await message.answer("❌ Скасовано", reply_markup=get_schedule_menu_kb(is_admin=is_admin))
         return
         
     # Skip if user accidentally pressed another main menu button or command
@@ -464,7 +491,7 @@ async def process_periods_input(message: Message, state: FSMContext, schedule_re
     )
 
 @router.message(ScheduleStates.confirming, F.text == "✅ Підтвердити")
-async def confirm_schedule(message: Message, state: FSMContext, schedule_repo: ScheduleRepository):
+async def confirm_schedule(message: Message, state: FSMContext, schedule_repo: ScheduleRepository, user_repo: UserRepository):
     """Confirm and save schedule"""
     data = await state.get_data()
     
@@ -486,25 +513,31 @@ async def confirm_schedule(message: Message, state: FSMContext, schedule_repo: S
         )
     
     await state.clear()
+    from bot.config import config
+    is_admin = message.from_user.id in config.ADMIN_IDS
     await message.answer(
         f"✅ <b>Графік збережено!</b>\n\n"
         f"📅 Дата: {target_date.strftime('%d.%m.%Y')}\n"
         f"📝 Додано блоків: {len(periods)}\n"
         f"🗑️ Видалено старих: {deleted}",
-        reply_markup=get_schedule_menu_kb(),
+        reply_markup=get_schedule_menu_kb(is_admin=is_admin),
         parse_mode="HTML"
     )
     
     logging.info(f"User {message.from_user.id} saved schedule for {target_date}: {periods}")
 
 @router.message(ScheduleStates.confirming, F.text == "❌ Скасувати")
-async def cancel_schedule_confirm(message: Message, state: FSMContext):
+async def cancel_schedule_confirm(message: Message, state: FSMContext, user_repo: UserRepository):
     """Cancel schedule entry at confirmation step"""
     await state.clear()
-    await message.answer("❌ Скасовано", reply_markup=get_schedule_menu_kb())
+    from bot.config import config
+    is_admin = message.from_user.id in config.ADMIN_IDS
+    await message.answer("❌ Скасовано", reply_markup=get_schedule_menu_kb(is_admin=is_admin))
 
 @router.message(ScheduleStates.waiting_for_download_confirm, F.text == "❌ Скасувати")
-async def cancel_download_confirm(message: Message, state: FSMContext):
+async def cancel_download_confirm(message: Message, state: FSMContext, user_repo: UserRepository):
     """Cancel HOE download at confirmation step"""
     await state.clear()
-    await message.answer("❌ Скасовано", reply_markup=get_schedule_menu_kb())
+    from bot.config import config
+    is_admin = message.from_user.id in config.ADMIN_IDS
+    await message.answer("❌ Скасовано", reply_markup=get_schedule_menu_kb(is_admin=is_admin))

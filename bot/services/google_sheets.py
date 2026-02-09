@@ -185,3 +185,31 @@ class GoogleSheetsService:
         
         return unique_candidates[:3]  # Return top 3 workers
 
+    def get_all_worker_names(self) -> List[str]:
+        """
+        Extract unique worker names from rows 39-60 of the first column.
+        """
+        self._ensure_init()
+        try:
+            # We only need the first column of the specified rows
+            # Rows 39-60 (index 38-59)
+            all_values = self.worksheet.get_all_values()
+            
+            names = set()
+            start_row_idx = 38
+            end_row_idx = 60
+            
+            for row_idx in range(start_row_idx, min(end_row_idx, len(all_values))):
+                row = all_values[row_idx]
+                if row and row[0].strip():
+                    name = row[0].strip()
+                    # Skip some obvious headers if any (optional, based on sheet structure)
+                    # "Прізвище та ім'я" or similar
+                    if name.lower() not in ["прізвище", "імя", "прізвище та ім'я", "worker", "name"]:
+                        names.add(name)
+            
+            return sorted(list(names))
+        except Exception as e:
+            logging.error(f"Failed to get all worker names: {e}")
+            return []
+

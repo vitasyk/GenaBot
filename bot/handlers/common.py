@@ -11,6 +11,7 @@ router = Router()
 @router.message(Command("menu"))
 @router.message(Command("help"))
 async def cmd_start(message: types.Message, user_repo: UserRepository):
+    from bot.config import config
     user = await user_repo.create_or_update(
         user_id=message.from_user.id,
         name=message.from_user.full_name
@@ -20,7 +21,7 @@ async def cmd_start(message: types.Message, user_repo: UserRepository):
         await message.answer("⛔ <b>Доступ заборонено</b>\nЗверніться до адміністратора для надання доступу.", parse_mode="HTML")
         return
     
-    is_admin = user.role == UserRole.admin
+    is_admin = message.from_user.id in config.ADMIN_IDS
     kb = get_main_keyboard(is_admin)
     
     await message.answer(
@@ -89,8 +90,8 @@ async def sos_gen_2(callback: types.CallbackQuery):
 
 @router.message(F.text == "📊 Адмін-панель")
 async def admin_panel_handler(message: types.Message, user_repo: UserRepository):
-    user = await user_repo.get_by_id(message.from_user.id)
-    if not user or user.role != UserRole.admin:
+    from bot.config import config
+    if message.from_user.id not in config.ADMIN_IDS:
         return
 
     text = "📊 <b>Адмін-панель</b>\n\n"

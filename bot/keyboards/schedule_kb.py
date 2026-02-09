@@ -21,13 +21,19 @@ def get_clear_confirm_kb() -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_schedule_menu_kb() -> ReplyKeyboardMarkup:
+def get_schedule_menu_kb(is_admin: bool = False) -> ReplyKeyboardMarkup:
     """Schedule management submenu"""
-    keyboard = [
-        [KeyboardButton(text="✏️ Ввести вручну"), KeyboardButton(text="🌐 Завантажити з HOE")],
-        [KeyboardButton(text="📸 Розпізнати з фото"), KeyboardButton(text="📋 Переглянути графік")],
-        [KeyboardButton(text="🗑️ Очистити графік"), KeyboardButton(text="🔙 Головне меню")]
-    ]
+    keyboard = []
+    
+    # Admin-only buttons
+    if is_admin:
+        keyboard.append([KeyboardButton(text="✏️ Ввести вручну"), KeyboardButton(text="📸 Розпізнати з фото")])
+        keyboard.append([KeyboardButton(text="🗑️ Очистити графік")])
+    
+    # Public buttons (available to all)
+    keyboard.append([KeyboardButton(text="📋 Переглянути графік"), KeyboardButton(text="🌐 Завантажити з HOE")])
+    keyboard.append([KeyboardButton(text="🔙 Головне меню")])
+    
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 def get_date_quick_kb() -> ReplyKeyboardMarkup:

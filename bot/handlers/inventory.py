@@ -15,8 +15,8 @@ router = Router()
 
 @router.message(F.text == "📦 Склад")
 async def check_stock(message: types.Message, inventory_service: InventoryService, user_repo: UserRepository):
-    user = await user_repo.get_by_id(message.from_user.id)
-    is_admin = user and user.role == UserRole.admin
+    from bot.config import config
+    is_admin = message.from_user.id in config.ADMIN_IDS
     
     stats = await inventory_service.get_detailed_stats()
     
@@ -60,8 +60,8 @@ async def stock_close_callback(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "stock_correct_date")
 async def stock_date_selector_callback(callback: types.CallbackQuery, user_repo: UserRepository):
-    user = await user_repo.get_by_id(callback.from_user.id)
-    if not user or user.role != UserRole.admin:
+    from bot.config import config
+    if callback.from_user.id not in config.ADMIN_IDS:
         await callback.answer("⛔ Тільки для адміністраторів", show_alert=True)
         return
 
@@ -90,8 +90,8 @@ async def stock_date_selector_callback(callback: types.CallbackQuery, user_repo:
 @router.callback_query(F.data == "stock_back_to_main")
 async def stock_back_handler(callback: types.CallbackQuery, inventory_service: InventoryService, user_repo: UserRepository):
     # Reuse check_stock logic but via edit_text
-    user = await user_repo.get_by_id(callback.from_user.id)
-    is_admin = user and user.role == UserRole.admin
+    from bot.config import config
+    is_admin = callback.from_user.id in config.ADMIN_IDS
     stats = await inventory_service.get_detailed_stats()
     
 
@@ -137,8 +137,8 @@ async def stock_process_date_callback(callback: types.CallbackQuery, inventory_s
 
 @router.callback_query(F.data.in_({"stock_add_1", "stock_add_5", "stock_dec_1"}))
 async def stock_control_callback(callback: types.CallbackQuery, inventory_service: InventoryService, user_repo: UserRepository):
-    user = await user_repo.get_by_id(callback.from_user.id)
-    if not user or user.role != UserRole.admin:
+    from bot.config import config
+    if callback.from_user.id not in config.ADMIN_IDS:
         await callback.answer("⛔ Тільки для адміністраторів", show_alert=True)
         return
 

@@ -144,8 +144,8 @@ async def back_to_status_callback(callback: types.CallbackQuery, generator_servi
 
 @router.message(F.text == "🔄 Керування")
 async def switch_gen_menu(message: types.Message, user_repo: UserRepository, generator_service: GeneratorService):
-    user = await user_repo.get_by_id(message.from_user.id)
-    if not user or user.role != UserRole.admin:
+    from bot.config import config
+    if message.from_user.id not in config.ADMIN_IDS:
         await message.answer("⛔ Ця функція доступна тільки адміністраторам.")
         return
 
