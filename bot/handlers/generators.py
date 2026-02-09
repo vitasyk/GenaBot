@@ -94,14 +94,17 @@ async def _get_status_panel(generator_service: GeneratorService, with_keyboard: 
         elif g.status == GenStatus.standby: icon = "🟡"
         status_map[g.name] = icon
 
-    kb = get_generator_control_kb(statuses=status_map, exclude_correction=exclude_correction) if with_keyboard else None
+    kb = get_generator_control_kb(statuses=status_map, exclude_correction=exclude_correction, exclude_stop_all=exclude_correction) if with_keyboard else None
     
     if kb:
         # Add Notification Toggle Button
         notify_status = await generator_service.get_notify_start_status()
         text_status = "🔔 Сповіщення: ON" if notify_status else "🔕 Сповіщення: OFF"
-        # Access internal list to append row (Standard aiogram Type)
         kb.inline_keyboard.append([InlineKeyboardButton(text=text_status, callback_data="toggle_notify_start")])
+        
+        # Add Close button for Status menu (when exclude_correction is True)
+        if exclude_correction:
+            kb.inline_keyboard.append([InlineKeyboardButton(text="❌ Закрити", callback_data="status_close")])
         
     return text, kb
 
@@ -112,6 +115,14 @@ async def toggle_notify_handler(callback: types.CallbackQuery, generator_service
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     state_str = "увімкнено" if new_state else "вимкнено"
     await callback.answer(f"Сповіщення {state_str}!")
+
+@router.callback_query(F.data == "status_close")
+async def status_close_handler(callback: types.CallbackQuery):
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass  # Message already deleted or not found
+    await callback.answer()
 
 def _get_correction_keyboard():
     builder = InlineKeyboardBuilder()
