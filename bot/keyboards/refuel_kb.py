@@ -25,3 +25,21 @@ def get_amount_kb(gen_name: str) -> InlineKeyboardMarkup:
         ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_refuel_accumulator_kb(gen_name: str, total_liters: float) -> InlineKeyboardMarkup:
+    """Accumulator-style keyboard with increment buttons"""
+    buttons = [
+        [
+            InlineKeyboardButton(text="+20л", callback_data=f"refuel_add_20"),
+            InlineKeyboardButton(text="+10л", callback_data=f"refuel_add_10"),
+            InlineKeyboardButton(text="+5л", callback_data=f"refuel_add_5")
+        ],
+        [
+            InlineKeyboardButton(text="↩️ Скасувати", callback_data="refuel_acc_cancel"),
+            InlineKeyboardButton(text="✅ Готово", callback_data=f"refuel_acc_done_{gen_name}")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад", callback_data="fuel_back")
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)

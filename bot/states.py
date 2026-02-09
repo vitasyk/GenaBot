@@ -8,6 +8,9 @@ class GenStates(StatesGroup):
 class InventoryStates(StatesGroup):
     waiting_for_stock_amount = State()
 
+class RefuelAccumulatorStates(StatesGroup):
+    accumulating = State()
+
 class SessionStates(StatesGroup):
     selecting_generators = State()
     waiting_for_generator = State()

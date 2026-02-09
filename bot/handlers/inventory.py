@@ -9,7 +9,7 @@ from bot.keyboards.inventory_kb import get_inventory_kb
 from bot.services.generator import GeneratorService
 from bot.services.inventory import InventoryService
 from aiogram.fsm.context import FSMContext
-from bot.states import InventoryStates
+from bot.states import InventoryStates, RefuelAccumulatorStates
 
 router = Router()
 
@@ -190,22 +190,111 @@ async def take_fuel_prompt(message: types.Message):
     await message.answer("Куди заправляємо?", reply_markup=get_refuel_kb())
 
 @router.callback_query(F.data.startswith("refuel_select_"))
-async def select_gen_step(callback: types.CallbackQuery):
-    target = callback.data.split("_")[2] # GEN-1, GEN-2, OTHER
+async def select_gen_step(callback: types.CallbackQuery, state: FSMContext):
+    from bot.keyboards.refuel_kb import get_refuel_accumulator_kb
+    from bot.states import RefuelAccumulatorStates
     
-    if target == "OTHER":
-        # Just confirm taking can, no generator update
-        # We need a new state or direct confirmation? 
-        # Let's handle OTHER directly here via a confirm call or just do it.
-        # To reuse logic, let's just make a special callback or direct call.
-        # Simpler: If OTHER, no amount needed.
-        # But we need access to services which are in the next handler usually? 
-        # Actually handlers have DI.
-        # We can't call another handler easily without FSM or trickery.
-        # Let's separate logic.
-        pass # Handle below in a specific handler or unified regex
+    target = callback.data.split("_")[2]  # Extract gen name
+    
+    # Initialize accumulator mode
+    await state.set_state(RefuelAccumulatorStates.accumulating)
+    await state.update_data(gen_name=target, accumulated_liters=0)
+    
+    await callback.message.edit_text(
+        f"⛽ <b>{target}</b>\n\nДодайте паливо:\n📊 Всього: 0 л",
+        reply_markup=get_refuel_accumulator_kb(target, 0),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@router.callback_query(RefuelAccumulatorStates.accumulating, F.data.startswith("refuel_add_"))
+async def refuel_add_increment(callback: types.CallbackQuery, state: FSMContext):
+    from bot.keyboards.refuel_kb import get_refuel_accumulator_kb
+    
+    # Extract increment amount
+    increment = int(callback.data.split("_")[2])
+    
+    # Get current data
+    data = await state.get_data()
+    gen_name = data.get("gen_name")
+    current_total = data.get("accumulated_liters", 0)
+    
+    # Add increment
+    new_total = current_total + increment
+    await state.update_data(accumulated_liters=new_total)
+    
+    # Update message with new total
+    await callback.message.edit_text(
+        f"⛽ <b>{gen_name}</b>\n\nДодайте паливо:\n📊 Всього: {new_total} л",
+        reply_markup=get_refuel_accumulator_kb(gen_name, new_total),
+        parse_mode="HTML"
+    )
+    await callback.answer(f"+{increment}л")
+
+@router.callback_query(RefuelAccumulatorStates.accumulating, F.data.startswith("refuel_acc_done_"))
+async def refuel_accumulator_done(callback: types.CallbackQuery, state: FSMContext, inventory_service: InventoryService, generator_service: GeneratorService):
+    # Get accumulated data
+    data = await state.get_data()
+    gen_name = data.get("gen_name")
+    total_liters = data.get("accumulated_liters", 0)
+    
+    # Clear FSM state
+    await state.clear()
+    
+    # Validate minimum amount
+    if total_liters <= 0:
+        await callback.answer("⚠️ Додайте хоча б трохи палива!", show_alert=True)
+        return
+    
+    # Call existing refuel logic
+    try:
+        # 1. Take EXACT liters from stock
+        new_amount_liters = await inventory_service.take_fuel(callback.from_user.id, total_liters)
+        new_amount_cans = new_amount_liters / 20.0
         
-    await callback.message.edit_text(f"Вибрано <b>{target}</b>\nСкільки літрів?", reply_markup=get_amount_kb(target), parse_mode="HTML")
+        # 2. Add specific liters to Generator
+        await generator_service.log_refuel(callback.from_user.id, gen_name, total_liters)
+             
+        # 3. Check Anti-Gel Threshold
+        gen = await generator_service.repo.get_by_name(gen_name)
+        antigel_warning = ""
+        kb_buttons = [
+            [types.InlineKeyboardButton(text="❌ Закрити", callback_data="refuel_close")]
+        ]
+        
+        if gen and gen.fuel_since_antigel >= 80:
+            antigel_warning = f"\n\n⚠️ <b>УВАГА: ПОТРІБНА ПРИСАДКА!</b>\nНакопичено <b>{gen.fuel_since_antigel:.1f}л</b> палива. Будь ласка, додайте Anti-Gel!"
+            kb_buttons.insert(0, [
+                types.InlineKeyboardButton(text="✅ Присадку додано", callback_data=f"antigel_reset_{gen_name}")
+            ])
+             
+        text = "✅ <b>Заправка успішна!</b>\n"
+        text += "➖➖➖➖➖➖➖➖➖➖\n"
+        
+        # Determine current status icon
+        status_icon = "🔴"
+        if gen and gen.status == GenStatus.running: status_icon = "🟢"
+        elif gen and gen.status == GenStatus.standby: status_icon = "🟡"
+        
+        text += f"⛽ {status_icon} <b>{gen_name}</b> +{total_liters}л\n"
+        text += f"📦 Залишок: <b>{new_amount_cans:.2f}</b> каністр"
+        text += antigel_warning
+        
+        await callback.message.edit_text(
+            text, 
+            parse_mode="HTML",
+            reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb_buttons)
+        )
+        await callback.answer()
+    except Exception as e:
+        logging.error(f"Refuel error: {e}")
+        await callback.message.answer(f"❌ Помилка: {e}")
+        await callback.answer()
+
+@router.callback_query(RefuelAccumulatorStates.accumulating, F.data == "refuel_acc_cancel")
+async def refuel_accumulator_cancel(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text("↩️ Заправку скасовано.")
     await callback.answer()
 
 @router.callback_query(F.data == "refuel_close")
