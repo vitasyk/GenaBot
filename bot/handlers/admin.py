@@ -33,10 +33,11 @@ def _get_admin_panel_kb():
     
     # Rows 4-5: System & Slack
     builder.add(InlineKeyboardButton(text="⚙️ Slack", callback_data="admin_slack_menu"))
+    builder.add(InlineKeyboardButton(text="📜 Журнал подій", callback_data="admin_view_logs"))
     builder.add(InlineKeyboardButton(text="🧹 Скинути історію", callback_data="admin_confirm_reset_logs"))
     builder.add(InlineKeyboardButton(text="❌ Закрити", callback_data="admin_close"))
     
-    builder.adjust(2, 2, 2, 2, 1)
+    builder.adjust(2, 2, 2, 3, 1)
     return builder.as_markup()
 
 # --- Session Management Handlers ---
@@ -405,6 +406,47 @@ async def do_reset_logs(callback: types.CallbackQuery, log_repo: LogRepository):
 @router.callback_query(F.data == "admin_close")
 async def admin_close_callback(callback: types.CallbackQuery):
     await callback.message.delete()
+    await callback.answer()
+
+@router.callback_query(F.data == "admin_view_logs")
+async def admin_view_logs(callback: types.CallbackQuery, log_repo: LogRepository, user_repo: UserRepository):
+    from bot.config import config
+    import zoneinfo
+    tz = zoneinfo.ZoneInfo(config.TIMEZONE)
+    
+    logs = await log_repo.get_recent_logs(limit=20)
+    users = await user_repo.get_all(include_blocked=True)
+    user_map = {u.id: (u.sheet_name or u.name or str(u.id)) for u in users}
+    
+    if not logs:
+        await callback.answer("📜 Журнал порожній")
+        return
+
+    text = "📜 <b>Останні події</b>\n"
+    text += "➖➖➖➖➖➖➖➖➖➖\n"
+    
+    for log in logs:
+        user_name = user_map.get(log.user_id, f"ID:{log.user_id}")
+        local_time = log.timestamp.replace(tzinfo=zoneinfo.ZoneInfo("UTC")).astimezone(tz)
+        time_str = local_time.strftime("%H:%M")
+        
+        # Clean up action text if it's too technical
+        action = log.action.replace("inventory_", "").replace("refuel_", "")
+        
+        line = f"🕒 <code>{time_str}</code> | 👤 <b>{user_name}</b> | {action}"
+        if log.details:
+            line += f" (<i>{log.details}</i>)"
+        
+        if len(text + line + "\n") > 4000: # Stay safe within message length
+            break
+        text += line + "\n"
+    
+    text += "➖➖➖➖➖➖➖➖➖➖"
+    
+    builder = InlineKeyboardBuilder()
+    builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel_back"))
+    
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     await callback.answer()
 @router.callback_query(F.data == "admin_confirm_delete_all_sessions")
 async def admin_confirm_delete_all_sessions(callback: types.CallbackQuery):

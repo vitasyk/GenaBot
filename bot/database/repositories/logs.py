@@ -24,3 +24,9 @@ class LogRepository(BaseRepository[LogEvent]):
     async def clear_all(self):
         from sqlalchemy import delete
         await self.session.execute(delete(LogEvent))
+
+    async def get_recent_logs(self, limit: int = 25) -> list[LogEvent]:
+        from sqlalchemy import select, desc
+        stmt = select(LogEvent).order_by(desc(LogEvent.timestamp)).limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
