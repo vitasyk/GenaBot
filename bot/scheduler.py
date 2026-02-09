@@ -12,8 +12,10 @@ from bot.database.repositories.generator import GeneratorRepository
 from bot.database.models import GenStatus
 from bot.services.weather import WeatherService
 from aiogram import Bot
+import zoneinfo
 
-scheduler = AsyncIOScheduler()
+# Initialize scheduler with configured timezone
+scheduler = AsyncIOScheduler(timezone=zoneinfo.ZoneInfo(config.TIMEZONE))
 
 async def check_rotation_needed(bot: Bot):
     async with session_maker() as session:

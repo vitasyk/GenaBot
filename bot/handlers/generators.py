@@ -1,4 +1,5 @@
 from aiogram import Router, F, types
+import logging
 from aiogram.fsm.context import FSMContext
 from bot.states import GenStates
 from bot.services.generator import GeneratorService
@@ -10,6 +11,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
 router = Router()
 
 async def _get_status_panel(generator_service: GeneratorService, with_keyboard: bool = True, exclude_correction: bool = False):
+    logging.info("Status panel requested - v2.0")
     gens = await generator_service.get_status()
     
     # Weather info

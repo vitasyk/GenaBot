@@ -28,7 +28,10 @@ class SessionService:
         Get timeline from manual database entries instead of parser.
         Returns a list of datetime objects (on the hour) when outages are scheduled.
         """
-        today = datetime.now().date()
+        from bot.config import config
+        import zoneinfo
+        tz = zoneinfo.ZoneInfo(config.TIMEZONE)
+        today = datetime.now(tz).date()
         tomorrow = today + timedelta(days=1)
         
         # Get entries for today and tomorrow
@@ -54,7 +57,10 @@ class SessionService:
         if not timeline:
             return None
             
-        now = datetime.now()
+        from bot.config import config
+        import zoneinfo
+        tz = zoneinfo.ZoneInfo(config.TIMEZONE)
+        now = datetime.now(tz).replace(tzinfo=None)
         
         # 2. Group timeline into continuous blocks
         blocks = []
@@ -106,7 +112,10 @@ class SessionService:
 
     async def _create_outage_session(self, block_start: datetime, deadline: datetime) -> RefuelSession:
         """Internal helper to create session and notify workers/admins"""
-        now = datetime.now()
+        from bot.config import config
+        import zoneinfo
+        tz = zoneinfo.ZoneInfo(config.TIMEZONE)
+        now = datetime.now(tz).replace(tzinfo=None)
         
         # Determine workers from Sheets for the period JUST BEFORE restoration
         try:
@@ -265,7 +274,10 @@ class SessionService:
 
     async def create_manual_session(self, hours: int = 2) -> RefuelSession:
         """Manually create a session starting now for X hours"""
-        now = datetime.now()
+        from bot.config import config
+        import zoneinfo
+        tz = zoneinfo.ZoneInfo(config.TIMEZONE)
+        now = datetime.now(tz).replace(tzinfo=None)
         deadline = now + timedelta(hours=hours)
         
         # Auto-lookup workers for manual session using current time

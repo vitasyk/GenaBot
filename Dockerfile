@@ -5,12 +5,12 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install system dependencies for OpenCV and PostgreSQL
-RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
     libglib2.0-0 \
     libpq-dev \
     gcc \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install
 COPY requirements.txt .

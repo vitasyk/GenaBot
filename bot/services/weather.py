@@ -10,42 +10,43 @@ class WeatherService:
         self.lon = config.CITY_LON
 
     async def get_current_temperature(self) -> float:
-        async with aiohttp.ClientSession() as session:
-            params = {
-                "lat": self.lat,
-                "lon": self.lon,
-                "appid": self.api_key,
-                "units": "metric"
-            }
-            async with session.get(f"{self.BASE_URL}/weather", params=params) as resp:
-                data = await resp.json()
-                if resp.status != 200:
-                    # Logging error would be good here
-                    return 0.0
-                return data["main"]["temp"]
+        try:
+            async with aiohttp.ClientSession() as session:
+                params = {
+                    "lat": self.lat,
+                    "lon": self.lon,
+                    "appid": self.api_key,
+                    "units": "metric"
+                }
+                async with session.get(f"{self.BASE_URL}/weather", params=params, timeout=5) as resp:
+                    if resp.status != 200:
+                        return 0.0
+                    data = await resp.json()
+                    return data["main"]["temp"]
+        except Exception as e:
+            # logging.error(f"Weather API error: {e}")
+            return 0.0
 
     async def get_weekly_forecast(self) -> list[dict]:
         """
         Returns list of daily forecasts.
         """
-        # "One Call API 3.0" needs separate subscription, using "5 day / 3 hour" is free-er but standard is better.
-        # Actually One Call is free for 1000 calls. Let's assume standard 5 day endpoint or onecall if configured.
-        # The user provided a standard key. "exclude=minutely,hourly" is for OneCall.
-        # Let's try standard 'forecast' endpoint which gives 5 days/3h.
-        
-        async with aiohttp.ClientSession() as session:
-            params = {
-                "lat": self.lat,
-                "lon": self.lon,
-                "appid": self.api_key,
-                "units": "metric"
-            }
-            # using /forecast endpoint (5 days/3 hour)
-            async with session.get(f"{self.BASE_URL}/forecast", params=params) as resp:
-                data = await resp.json()
-                if resp.status != 200:
-                    return []
-                return data.get("list", [])
+        try:
+            async with aiohttp.ClientSession() as session:
+                params = {
+                    "lat": self.lat,
+                    "lon": self.lon,
+                    "appid": self.api_key,
+                    "units": "metric"
+                }
+                # using /forecast endpoint (5 days/3 hour)
+                async with session.get(f"{self.BASE_URL}/forecast", params=params, timeout=5) as resp:
+                    if resp.status != 200:
+                        return []
+                    data = await resp.json()
+                    return data.get("list", [])
+        except Exception:
+            return []
 
     async def check_cold_weather_alert(self) -> str | None:
         """

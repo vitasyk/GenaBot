@@ -65,9 +65,15 @@ class SessionRepository:
                                liters: float, 
                                cans: float, 
                                notes: str = None) -> Optional[RefuelSession]:
+        
+        from bot.config import config
+        import zoneinfo
+        tz = zoneinfo.ZoneInfo(config.TIMEZONE)
+        end_time_local = datetime.now(tz).replace(tzinfo=None)
+
         stmt = update(RefuelSession).where(RefuelSession.id == session_id).values(
             status=SessionStatus.completed,
-            end_time=datetime.utcnow(),
+            end_time=end_time_local,
             completed_by=completed_by,
             gen_name=gen_name,
             liters=liters,
