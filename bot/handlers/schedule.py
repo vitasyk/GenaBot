@@ -265,6 +265,14 @@ async def process_hoe_download_callback(callback: CallbackQuery):
         else:
             await callback.message.edit_text(f"❌ <b>Помилка завантаження</b>: {str(e)}", parse_mode="HTML")
 
+@router.message(ScheduleStates.waiting_for_screenshot, F.text == "🔙 Скасувати")
+async def process_schedule_screenshot_cancel(message: Message, state: FSMContext, user_repo: UserRepository):
+    """Cancel waiting for screenshot"""
+    await state.clear()
+    from bot.config import config
+    is_admin = message.from_user.id in config.ADMIN_IDS
+    await message.answer("❌ Скасовано", reply_markup=get_schedule_menu_kb(is_admin=is_admin))
+
 @router.message(ScheduleStates.waiting_for_screenshot, F.photo | F.document)
 async def process_schedule_screenshot(message: Message, state: FSMContext, user_repo: UserRepository):
     """Process uploaded screenshot using ScheduleParser"""
