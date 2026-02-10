@@ -114,3 +114,70 @@ class InventoryService:
             "avg_hourly_consumption": avg_hourly,
             "hours_left": hours_left
         }
+
+    async def get_current_week_usage(self) -> float:
+        """
+        Calculates total fuel consumption for the current week (Monday 00:00 to now).
+        """
+        from datetime import datetime, timedelta
+        
+        now = datetime.utcnow()
+        # Find last Monday
+        days_since_monday = now.weekday() # Mon=0, Sun=6
+        last_monday = now - timedelta(days=days_since_monday)
+        last_monday_midnight = last_monday.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        refuel_events = await self.logs.get_actions_since("TAKE_FUEL", last_monday_midnight)
+        
+        total_consumed = 0.0
+        for event in refuel_events:
+            try:
+                # "Taken: 20L. Remaining: ..."
+                part = event.details.split("Taken: ")[1].split("L")[0]
+                total_consumed += float(part)
+            except:
+                pass
+        
+        return total_consumed
+
+    async def get_consumption_history(self, limit: int = 5) -> list[dict]:
+        """
+        Returns last N consumption events.
+        """
+        from bot.database.models import LogEvent
+        from sqlalchemy import select, desc
+        
+        # We need to access repo session directly or through logs repo if it exposes query
+        # LogRepository usually has basic methods. let's check logs repo or use session directly
+        # Assuming we can use self.logs.session
+        
+        stmt = (
+            select(LogEvent)
+            .filter_by(action="TAKE_FUEL")
+            .order_by(desc(LogEvent.timestamp))
+            .limit(limit)
+        )
+        
+        result = await self.logs.session.execute(stmt)
+        events = result.scalars().all()
+        
+        history = []
+        for e in events:
+            # Get user name if possible
+            user = await self.users.get_by_id(e.user_id)
+            user_name = user.name if user else f"ID {e.user_id}"
+            
+            # Parse amount
+            amount = "?"
+            try:
+                amount = e.details.split("Taken: ")[1].split("L")[0]
+            except:
+                pass
+                
+            history.append({
+                "date": e.timestamp,
+                "user": user_name,
+                "amount": amount
+            })
+            
+        return history

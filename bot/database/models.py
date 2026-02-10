@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from sqlalchemy import BigInteger, String, DateTime, ForeignKey, Integer, Float, Date
+from sqlalchemy import BigInteger, String, DateTime, ForeignKey, Integer, Float, Date, JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.ext.asyncio import AsyncAttrs
 
@@ -117,6 +117,10 @@ class RefuelSession(Base):
     worker1_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
     worker2_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
     worker3_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
+    
+    # Additional workers beyond the first 3 (stored as list of worker IDs)
+    # Format: [123456789, 987654321, ...]
+    additional_workers: Mapped[list] = mapped_column(JSON, nullable=True, default=list)
     
     # Completion Data
     gen_name: Mapped[str] = mapped_column(String, nullable=True)

@@ -29,7 +29,14 @@ class WeatherService:
 
     async def get_weekly_forecast(self) -> list[dict]:
         """
-        Returns list of daily forecasts.
+        Returns list of daily forecasts (aggregated from 3h data).
+        Each item: {
+            "date": "2023-10-27",
+            "temp_min": 5.0,
+            "temp_max": 12.0,
+            "condition": "Clouds",
+            "icon": "04d"
+        }
         """
         try:
             async with aiohttp.ClientSession() as session:
@@ -44,7 +51,50 @@ class WeatherService:
                     if resp.status != 200:
                         return []
                     data = await resp.json()
-                    return data.get("list", [])
+                    raw_list = data.get("list", [])
+                    
+                    # Aggregate by day
+                    daily_data = {}
+                    from datetime import datetime
+                    
+                    for item in raw_list:
+                        dt_txt = item.get("dt_txt", "")
+                        if not dt_txt: continue
+                        
+                        date_str = dt_txt.split(" ")[0]
+                        temp = item["main"]["temp"]
+                        weather = item["weather"][0]
+                        
+                        if date_str not in daily_data:
+                            daily_data[date_str] = {
+                                "temps": [],
+                                "conditions": [],
+                                "icons": []
+                            }
+                        
+                        daily_data[date_str]["temps"].append(temp)
+                        daily_data[date_str]["conditions"].append(weather["main"])
+                        daily_data[date_str]["icons"].append(weather["icon"])
+                    
+                    # Format output
+                    result = []
+                    for date, info in daily_data.items():
+                        temps = info["temps"]
+                        # Simple most common condition
+                        from collections import Counter
+                        common_cond = Counter(info["conditions"]).most_common(1)[0][0]
+                        common_icon = Counter(info["icons"]).most_common(1)[0][0]
+                        
+                        result.append({
+                            "date": date,
+                            "temp_min": min(temps),
+                            "temp_max": max(temps),
+                            "temp_avg": sum(temps) / len(temps),
+                            "condition": common_cond,
+                            "icon": common_icon
+                        })
+                        
+                    return result
         except Exception:
             return []
 
@@ -58,13 +108,12 @@ class WeatherService:
         coldest_day = ""
         
         for f in forecasts:
-            temp = f["main"]["temp_min"]
-            if temp < min_temp:
-                min_temp = temp
-                coldest_day = f["dt_txt"]
+            if f["temp_min"] < min_temp:
+                min_temp = f["temp_min"]
+                coldest_day = f["date"]
         
         if min_temp < -10:
-            return f"❄️ <b>Cold Warning!</b>\nTemp will drop to <b>{min_temp}°C</b> on {coldest_day}.\nCheck fuel and Anti-Gel!"
+            return f"❄️ <b>Cold Warning!</b>\nTemp will drop to <b>{min_temp:.1f}°C</b> on {coldest_day}.\nCheck fuel and Anti-Gel!"
         
         return None
 

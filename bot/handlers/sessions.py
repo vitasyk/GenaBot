@@ -10,6 +10,7 @@ from bot.database.repositories.session import SessionRepository
 from bot.database.repositories.user import UserRepository
 from bot.services.notifier import NotifierService
 from bot.services.generator import GeneratorService
+from bot.services.inventory import InventoryService
 from bot.database.repositories.generator import GeneratorRepository
 from bot.database.repositories.logs import LogRepository
 from bot.database.models import SessionStatus
@@ -219,14 +220,14 @@ async def process_antigel(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 @router.callback_query(SessionStates.waiting_for_notes, F.data == "skip_step")
-async def skip_note_callback(callback: CallbackQuery, state: FSMContext, bot: Bot, generator_service: GeneratorService):
-    await finish_session(callback, state, bot, notes=None, generator_service=generator_service)
+async def skip_note_callback(callback: CallbackQuery, state: FSMContext, bot: Bot, generator_service: GeneratorService, inventory_service: InventoryService):
+    await finish_session(callback, state, bot, notes=None, generator_service=generator_service, inventory_service=inventory_service)
 
 @router.message(SessionStates.waiting_for_notes)
-async def process_notes(message: Message, state: FSMContext, bot: Bot, generator_service: GeneratorService):
-    await finish_session(message, state, bot, notes=message.text, generator_service=generator_service)
+async def process_notes(message: Message, state: FSMContext, bot: Bot, generator_service: GeneratorService, inventory_service: InventoryService):
+    await finish_session(message, state, bot, notes=message.text, generator_service=generator_service, inventory_service=inventory_service)
 
-async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot: Bot, notes: str | None, generator_service: GeneratorService = None):
+async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot: Bot, notes: str | None, generator_service: GeneratorService = None, inventory_service: InventoryService = None):
     # Note: GeneratorService might need to be passed or fetched if not available via DI in this async def context
     # Usually it should be passed from the handlers that call finish_session
     
@@ -252,6 +253,18 @@ async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot:
         async with session_maker() as session:
             repo = SessionRepository(session)
             
+            # Deduct fuel from inventory stock
+            if inventory_service:
+                try:
+                    new_stock_liters = await inventory_service.take_fuel(user_id, total_liters)
+                    new_stock_cans = new_stock_liters / 20.0
+                except Exception as e:
+                    import logging
+                    logging.error(f"Failed to deduct fuel from inventory: {e}")
+                    new_stock_cans = None
+            else:
+                new_stock_cans = None
+            
             completed_session = await repo.complete_session(
                 session_id=session_id,
                 completed_by=user_id,
@@ -274,6 +287,10 @@ async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot:
                 f"💉 Антигель: {antigel_text}\n"
                 f"🕒 Час: {completed_session.end_time.strftime('%H:%M')}"
             )
+            
+            # Add stock info if available
+            if new_stock_cans is not None:
+                msg += f"\n📦 Залишок на складі: {new_stock_cans:.2f} кан"
             
             if notes:
                 msg += f"\n📝 Нотатки: {notes}"
@@ -304,6 +321,18 @@ async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot:
         async with session_maker() as session:
             repo = SessionRepository(session)
             
+            # Deduct fuel from inventory stock
+            if inventory_service:
+                try:
+                    new_stock_liters = await inventory_service.take_fuel(user_id, liters)
+                    new_stock_cans = new_stock_liters / 20.0
+                except Exception as e:
+                    import logging
+                    logging.error(f"Failed to deduct fuel from inventory: {e}")
+                    new_stock_cans = None
+            else:
+                new_stock_cans = None
+            
             completed_session = await repo.complete_session(
                 session_id=session_id,
                 completed_by=user_id,
@@ -320,6 +349,10 @@ async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot:
                 f"⛽️ Паливо: {liters}л ({cans:.1f} кан)\n"
                 f"🕒 Час: {completed_session.end_time.strftime('%H:%M')}"
             )
+            
+            # Add stock info if available
+            if new_stock_cans is not None:
+                msg += f"\n📦 Залишок на складі: {new_stock_cans:.2f} кан"
             
             if isinstance(event, CallbackQuery):
                 await event.message.edit_text(msg, parse_mode="HTML")

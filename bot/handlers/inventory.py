@@ -27,6 +27,9 @@ async def check_stock(message: types.Message, inventory_service: InventoryServic
     total_w = stats["total_weekly_consumption"]
     hours_left = stats["hours_left"]
     
+    # Get current week usage (Mon-Sun)
+    current_week_usage = await inventory_service.get_current_week_usage()
+    
     text = "📦 <b>Склад палива</b>\n"
     text += "➖➖➖➖➖➖➖➖➖➖\n"
     text += f"🛒 Залишок: <b>{stock_cans:.2f}</b> каністр\n"
@@ -37,7 +40,8 @@ async def check_stock(message: types.Message, inventory_service: InventoryServic
     
     if avg_h > 0.001:
         days_left = hours_left / 24.0
-        text += f"📉 Витрачено за 7 днів: <b>{total_w:.1f}</b> л\n"
+        text += f"📉 Тиждень (Пн-Нд): <b>{current_week_usage:.1f}</b> л\n"
+        text += f"📉 Останні 7 днів: <b>{total_w:.1f}</b> л\n"
         text += f"📊 Сер. витрата (доба): <b>{stats['avg_daily_consumption']:.1f}</b> л\n"
         text += f"📊 Сер. витрата: ~<b>{avg_h:.2f}</b> л/год ⏳\n"
         text += f" Вистачить на: ~<b>{hours_left:.1f}</b> год"
@@ -85,6 +89,40 @@ async def stock_date_selector_callback(callback: types.CallbackQuery, user_repo:
         reply_markup=builder.as_markup(),
         parse_mode="HTML"
     )
+    await callback.answer()
+
+@router.callback_query(F.data == "stock_history")
+async def stock_history_callback(callback: types.CallbackQuery, inventory_service: InventoryService):
+    from bot.config import config
+    if callback.from_user.id not in config.ADMIN_IDS:
+        await callback.answer("⛔ Тільки для адміністраторів", show_alert=True)
+        return
+        
+    history = await inventory_service.get_consumption_history(limit=10)
+    
+    if not history:
+        await callback.answer("ℹ️ Історія порожня", show_alert=True)
+        return
+        
+    text = "📜 <b>Історія витрат (останні 10)</b>\n"
+    text += "➖➖➖➖➖➖➖➖➖➖\n"
+    
+    for item in history:
+        dt = item['date'].strftime('%d.%m %H:%M')
+        amount = item['amount']
+        user = item['user']
+        # Try to clean up amount string if it contains "Taken: "
+        if "Taken: " in str(amount):
+            amount = str(amount).replace("Taken: ", "")
+            
+        text += f"⛽ <b>{amount}</b>л | {dt}\n"
+        text += f"👤 {user}\n"
+        text += "------------------\n"
+        
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="stock_back_to_main"))
+    
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     await callback.answer()
 
 @router.callback_query(F.data == "stock_back_to_main")

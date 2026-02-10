@@ -129,7 +129,7 @@ class SessionService:
             logging.error(f"Failed to get workers for block: {e}")
             worker_tuples = []
 
-        w1_id, w2_id, w3_id, w1_n, w2_n, w3_n = await self._get_workers_from_tuples(worker_tuples)
+        w1_id, w2_id, w3_id, additional_workers, all_worker_names = await self._get_workers_from_tuples(worker_tuples)
 
         # Create Session with 2-hour duration from NOW
         effective_deadline = now + timedelta(hours=2)
@@ -139,16 +139,29 @@ class SessionService:
             deadline=effective_deadline,
             worker1_id=w1_id,
             worker2_id=w2_id,
-            worker3_id=w3_id
+            worker3_id=w3_id,
+            additional_workers=additional_workers
         )
+        
         
         # Notify
         if self.notifier:
-            t1 = self._get_worker_tag(w1_id, w1_n)
-            t2 = self._get_worker_tag(w2_id, w2_n)
-            t3 = self._get_worker_tag(w3_id, w3_n)
+            from bot.database.repositories.session_helpers import get_all_workers_for_session
             
-            worker_tags = ", ".join([t for t in [t1, t2, t3] if "Unknown" not in t]) or "Unknown"
+            # Build worker tags for display
+            worker_tag_list = []
+            for idx, name in enumerate(all_worker_names):
+                # Match name with ID
+                worker_id = None
+                if idx < len([w1_id, w2_id, w3_id] + additional_workers):
+                    all_ids = [w1_id, w2_id, w3_id] + additional_workers
+                    worker_id = all_ids[idx] if all_ids[idx] else None
+                
+                tag = self._get_worker_tag(worker_id, name)
+                if "Unknown" not in tag:
+                    worker_tag_list.append(tag)
+            
+            worker_tags = ", ".join(worker_tag_list) or "Unknown"
 
             def fmt_dt(dt):
                 if dt.date() == now.date(): return dt.strftime('%H:%M')
@@ -162,40 +175,46 @@ class SessionService:
             from bot.keyboards.session_kb import get_start_session_kb
             kb = get_start_session_kb(session.id)
             
-            if w1_id: await self.notifier.notify_user(w1_id, msg, reply_markup=kb)
-            if w2_id: await self.notifier.notify_user(w2_id, msg, reply_markup=kb)
-            if w3_id: await self.notifier.notify_user(w3_id, msg, reply_markup=kb)
+            # Notify all assigned workers
+            all_worker_ids = get_all_workers_for_session(session)
+            for worker_id in all_worker_ids:
+                await self.notifier.notify_user(worker_id, msg, reply_markup=kb)
 
             admin_msg = f"🚀 <b>Створено сесію заправки</b> (ID: {session.id})\n" \
                         f"⏰ Період: {fmt_dt(block_start)} - {fmt_dt(deadline)}\n" \
-                        f"👷 Воркери: {worker_tags}\n"
+                        f"👷 Воркери ({len(all_worker_ids)}): {worker_tags}\n"
             
-            if not any([w1_id, w2_id, w3_id]): admin_msg += "❌ <b>Помилка:</b> Воркерів не знайдено!"
+            if not all_worker_ids: admin_msg += "❌ <b>Помилка:</b> Воркерів не знайдено!"
             await self.notifier.notify_admins(admin_msg)
             
         return session
 
     async def _get_workers_from_tuples(self, worker_tuples):
-        """Helper to lookup IDs for worker name tuples"""
-        w1_n, w2_n, w3_n = "Unknown", "Unknown", "Unknown"
-        w1_id, w2_id, w3_id = None, None, None
+        """Helper to lookup IDs for ALL worker name tuples (no limit)"""
+        from bot.database.repositories.session_helpers import split_workers
         
-        if len(worker_tuples) > 0:
-            w1_n = worker_tuples[0][0]
-            u1 = await self._find_user_by_name_robust(w1_n)
-            if u1: w1_id = u1.id
-            
-        if len(worker_tuples) > 1:
-            w2_n = worker_tuples[1][0]
-            u2 = await self._find_user_by_name_robust(w2_n)
-            if u2: w2_id = u2.id
-            
-        if len(worker_tuples) > 2:
-            w3_n = worker_tuples[2][0]
-            u3 = await self._find_user_by_name_robust(w3_n)
-            if u3: w3_id = u3.id
-            
-        return w1_id, w2_id, w3_id, w1_n, w2_n, w3_n
+        worker_ids = []
+        worker_names = []
+        
+        for name, _phone in worker_tuples:
+            user = await self._find_user_by_name_robust(name)
+            if user:
+                worker_ids.append(user.id)
+                worker_names.append(name)
+            else:
+                # Keep track of unmatched names for logging
+                worker_names.append(name)
+                logging.warning(f"Could not find user ID for worker: {name}")
+        
+        # Split into first 3 + additional
+        w1_id, w2_id, w3_id, additional = split_workers(worker_ids)
+        
+        # Return IDs, names for compatibility
+        w1_n = worker_names[0] if len(worker_names) > 0 else "Unknown"
+        w2_n = worker_names[1] if len(worker_names) > 1 else "Unknown"
+        w3_n = worker_names[2] if len(worker_names) > 2 else "Unknown"
+        
+        return w1_id, w2_id, w3_id, additional, worker_names
 
     def _get_worker_tag(self, worker_id: int | None, name: str) -> str:
         """Helper to create HTML mention if ID is available, else just bold name"""
@@ -203,11 +222,8 @@ class SessionService:
             return f"<a href='tg://user?id={worker_id}'>{name}</a>"
         return f"<b>{name}</b>"
 
-    async def _get_workers_for_start_time(self, start_dt: datetime) -> tuple[int | None, int | None, int | None, str, str, str]:
-        """Helper to find workers for a specific start time based on Sheets schedule"""
-        w1_name, w2_name, w3_name = "Unknown", "Unknown", "Unknown"
-        worker1_id, worker2_id, worker3_id = None, None, None
-        
+    async def _get_workers_for_start_time(self, start_dt: datetime) -> tuple[int | None, int | None, int | None, List[int], List[str]]:
+        """Helper to find ALL workers for a specific start time based on Sheets schedule"""
         try:
             # Use 1 minute before to avoid picking 'just-started' shifts at boundary hours
             lookup_dt = start_dt - timedelta(minutes=1)
@@ -218,26 +234,13 @@ class SessionService:
             
             logging.info(f"Sheets returned {len(worker_tuples)} workers for {start_dt}")
             
-            if len(worker_tuples) > 0:
-                w1_name = worker_tuples[0][0]
-                user1 = await self._find_user_by_name_robust(w1_name)
-                if user1: worker1_id = user1.id
-                
-            if len(worker_tuples) > 1:
-                w2_name = worker_tuples[1][0]
-                user2 = await self._find_user_by_name_robust(w2_name)
-                if user2: worker2_id = user2.id
-
-            if len(worker_tuples) > 2:
-                w3_name = worker_tuples[2][0]
-                user3 = await self._find_user_by_name_robust(w3_name)
-                if user3: worker3_id = user3.id
-                
-            logging.info(f"Workers lookup results: {w1_name}({worker1_id}), {w2_name}({worker2_id}), {w3_name}({worker3_id})")
+            # Use the same helper as _create_outage_session
+            w1_id, w2_id, w3_id, additional_workers, all_worker_names = await self._get_workers_from_tuples(worker_tuples)
+            
+            return w1_id, w2_id, w3_id, additional_workers, all_worker_names
         except Exception as e:
             logging.error(f"Failed to get workers: {e}", exc_info=True)
-            
-        return worker1_id, worker2_id, worker3_id, w1_name, w2_name, w3_name
+            return None, None, None, [], []
 
     async def _find_user_by_name_robust(self, name: str) -> Optional[User]:
         """Attempt to find user by sheet_name or telegram name with some flexibility"""
@@ -281,28 +284,35 @@ class SessionService:
         deadline = now + timedelta(hours=hours)
         
         # Auto-lookup workers for manual session using current time
-        worker1_id, worker2_id, worker3_id, w1_name, w2_name, w3_name = await self._get_workers_for_start_time(now)
+        worker1_id, worker2_id, worker3_id, additional_workers, all_worker_names = await self._get_workers_for_start_time(now)
         
         session = await self.repo.create_session(
             start_time=now,
             deadline=deadline,
             worker1_id=worker1_id,
             worker2_id=worker2_id,
-            worker3_id=worker3_id
+            worker3_id=worker3_id,
+            additional_workers=additional_workers
         )
         
         if self.notifier:
-            t1 = self._get_worker_tag(worker1_id, w1_name)
-            t2 = self._get_worker_tag(worker2_id, w2_name)
-            t3 = self._get_worker_tag(worker3_id, w3_name)
+            from bot.database.repositories.session_helpers import get_all_workers_for_session
             
-            worker_tags_str = ", ".join([t for t in [t1, t2, t3] if "Unknown" not in t])
-            if not worker_tags_str: worker_tags_str = "Unknown"
+            # Build worker tags
+            worker_tag_list = []
+            all_worker_ids = get_all_workers_for_session(session)
+            for idx, name in enumerate(all_worker_names):
+                worker_id = all_worker_ids[idx] if idx < len(all_worker_ids) else None
+                tag = self._get_worker_tag(worker_id, name)
+                if "Unknown" not in tag:
+                    worker_tag_list.append(tag)
+            
+            worker_tags_str = ", ".join(worker_tag_list) if worker_tag_list else "Unknown"
 
             msg = f"📝 <b>Ручне створення сесії</b>\n" \
                   f"ID: {session.id}\n" \
                   f"Дедлайн: {deadline.strftime('%H:%M')}\n" \
-                  f"👷 Воркери: {worker_tags_str}"
+                  f"👷 Воркери ({len(all_worker_ids)}): {worker_tags_str}"
             
             await self.notifier.notify_admins(msg)
             
@@ -315,8 +325,7 @@ class SessionService:
             from bot.keyboards.session_kb import get_start_session_kb
             kb = get_start_session_kb(session.id)
             
-            if worker1_id: await self.notifier.notify_user(worker1_id, worker_msg, reply_markup=kb)
-            if worker2_id: await self.notifier.notify_user(worker2_id, worker_msg, reply_markup=kb)
-            if worker3_id: await self.notifier.notify_user(worker3_id, worker_msg, reply_markup=kb)
+            for worker_id in all_worker_ids:
+                await self.notifier.notify_user(worker_id, worker_msg, reply_markup=kb)
             
         return session

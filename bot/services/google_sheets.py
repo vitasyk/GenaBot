@@ -99,9 +99,9 @@ class GoogleSheetsService:
         workers = []
         
         # Skip header rows (first 2-3 rows), start from actual data
-        # User requested restriction: Only rows 39-60 participate in refueling
-        # Row 39 is index 38. Row 60 is index 59.
-        start_row_idx = 38
+        # User requested restriction: Only rows 4-60 participate in refueling
+        # Row 4 is index 3. Row 60 is index 59.
+        start_row_idx = 3
         end_row_idx = 60 # Check up to row 60 (index 59)
         
         for row_idx in range(start_row_idx, min(end_row_idx, len(all_values))):
@@ -183,7 +183,7 @@ class GoogleSheetsService:
                 unique_candidates.append(worker)
                 seen_names.add(worker[0])
         
-        return unique_candidates[:3]  # Return top 3 workers
+        return unique_candidates  # Return all workers (no limit)
 
     def get_all_worker_names(self) -> List[str]:
         """
@@ -192,11 +192,11 @@ class GoogleSheetsService:
         self._ensure_init()
         try:
             # We only need the first column of the specified rows
-            # Rows 39-60 (index 38-59)
+            # Rows 4-60 (index 3-59)
             all_values = self.worksheet.get_all_values()
             
             names = set()
-            start_row_idx = 38
+            start_row_idx = 3
             end_row_idx = 60
             
             for row_idx in range(start_row_idx, min(end_row_idx, len(all_values))):
