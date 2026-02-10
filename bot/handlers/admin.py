@@ -551,8 +551,15 @@ async def do_reset_logs(callback: types.CallbackQuery, log_repo: LogRepository):
 
 @router.callback_query(F.data == "admin_close")
 async def admin_close_callback(callback: types.CallbackQuery):
-    await callback.message.delete()
-    await callback.answer()
+    try:
+        await callback.message.delete()
+    except:
+        pass
+        
+    try:
+        await callback.answer()
+    except TelegramBadRequest:
+        pass
 
 @router.callback_query(F.data == "admin_view_logs")
 async def admin_view_logs(callback: types.CallbackQuery, log_repo: LogRepository, user_repo: UserRepository):
