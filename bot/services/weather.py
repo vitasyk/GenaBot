@@ -133,14 +133,14 @@ class WeatherService:
             
             # Simple forecast summary (next 24h)
             forecasts = await self.get_weekly_forecast()
-            # Find min/max for next 24h (approx 8 items x 3h)
-            next_24h = forecasts[:8]
-            if not next_24h:
+            
+            if not forecasts:
                  return "⚠️ Weather data unavailable."
                  
-            temps = [f["main"]["temp"] for f in next_24h]
-            min_temp = min(temps)
-            max_temp = max(temps)
+            # Use the first day's aggregated data
+            today_forecast = forecasts[0]
+            min_temp = today_forecast["temp_min"]
+            max_temp = today_forecast["temp_max"]
             
             # Determine status
             is_freezing = min_temp < 0
