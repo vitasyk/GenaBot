@@ -25,12 +25,12 @@ def get_gen_selection_kb(selected_gens: list[str] = None, statuses: dict = None)
     
     kb = []
     # Status icons default to stopped if missing
-    s1 = statuses.get("GEN-1 (003)", "🔴") if statuses else "🔴"
-    s2 = statuses.get("GEN-2 (036) WILSON", "🔴") if statuses else "🔴"
+    s1 = statuses.get("GEN-1 (036)", "🔴") if statuses else "🔴"
+    s2 = statuses.get("GEN-2 (003) WILSON", "🔴") if statuses else "🔴"
 
     gens = [
-        (f"{s1} GEN-1 (003)", "GEN-1 (003)", ""),
-        (f"{s2} GEN-2 (036) WILSON", "GEN-2 (036) WILSON", "")
+        (f"{s1} GEN-1 (036)", "GEN-1 (036)", ""),
+        (f"{s2} GEN-2 (003) WILSON", "GEN-2 (003) WILSON", "")
     ]
     
     for display_name, internal_name, label in gens:
@@ -53,12 +53,12 @@ def get_gen_selection_kb(selected_gens: list[str] = None, statuses: dict = None)
 
 def get_gen_choice_kb(statuses: dict = None) -> InlineKeyboardMarkup:
     """Keyboard for choosing generator (DEPRECATED - use get_gen_selection_kb)"""
-    s1 = statuses.get("GEN-1 (003)", "🔴") if statuses else "🔴"
-    s2 = statuses.get("GEN-2 (036) WILSON", "🔴") if statuses else "🔴"
+    s1 = statuses.get("GEN-1 (036)", "🔴") if statuses else "🔴"
+    s2 = statuses.get("GEN-2 (003) WILSON", "🔴") if statuses else "🔴"
     
     kb = [
-        [InlineKeyboardButton(text=f"{s1} GEN-1 (003)", callback_data="gen_choice:GEN-1 (003)")],
-        [InlineKeyboardButton(text=f"{s2} GEN-2 (036) WILSON", callback_data="gen_choice:GEN-2 (036) WILSON")],
+        [InlineKeyboardButton(text=f"{s1} GEN-1 (036)", callback_data="gen_choice:GEN-1 (036)")],
+        [InlineKeyboardButton(text=f"{s2} GEN-2 (003) WILSON", callback_data="gen_choice:GEN-2 (003) WILSON")],
         [InlineKeyboardButton(text="Обидва", callback_data="gen_choice:both")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)

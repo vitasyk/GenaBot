@@ -146,13 +146,12 @@ class GeneratorService:
         await self.logs.log_action(user_id, "UPDATE_SPECS", f"Updated {name}: Cap={capacity}L, Rate={rate}L/h")
 
     async def rename_generators_init(self):
-        # Migration to standardized names: GEN-1 (003) and GEN-2 (036) WILSON
-        await self.repo.rename_generator("GEN-1", "GEN-1 (003)")
-        await self.repo.rename_generator("GEN-003", "GEN-1 (003)")
+        # Migration to standardized names: 
+        # GEN-1 (003) -> GEN-1 (036)
+        await self.repo.rename_generator("GEN-1 (003)", "GEN-1 (036)")
         
-        await self.repo.rename_generator("GEN-2", "GEN-2 (036) WILSON") 
-        await self.repo.rename_generator("GEN-038", "GEN-2 (036) WILSON")
-        await self.repo.rename_generator("GEN-2 (038)", "GEN-2 (036) WILSON")
+        # GEN-2 (036) WILSON -> GEN-2 (003) WILSON
+        await self.repo.rename_generator("GEN-2 (036) WILSON", "GEN-2 (003) WILSON")
 
     async def get_remaining_runtime(self, gen_name: str) -> float:
         """Returns hours left based on current fuel and consumption rate (weather adjusted)."""

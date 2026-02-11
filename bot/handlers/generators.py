@@ -162,7 +162,7 @@ async def switch_gen_menu(message: types.Message, user_repo: UserRepository, gen
 
 @router.callback_query(F.data.startswith("start_gen_"))
 async def start_generator_callback(callback: types.CallbackQuery, generator_service: GeneratorService):
-    gen_names = {"start_gen_1": "GEN-1 (003)", "start_gen_2": "GEN-2 (036) WILSON"}
+    gen_names = {"start_gen_1": "GEN-1 (036)", "start_gen_2": "GEN-2 (003) WILSON"}
     gen_name = gen_names.get(callback.data)
     if not gen_name:
         await callback.answer("Помилка: Генератор не знайдений")
@@ -182,7 +182,7 @@ async def start_generator_callback(callback: types.CallbackQuery, generator_serv
 
 @router.callback_query(F.data.startswith("standby_gen_"))
 async def standby_generator_callback(callback: types.CallbackQuery, generator_service: GeneratorService):
-    gen_names = {"standby_gen_1": "GEN-1 (003)", "standby_gen_2": "GEN-2 (036) WILSON"}
+    gen_names = {"standby_gen_1": "GEN-1 (036)", "standby_gen_2": "GEN-2 (003) WILSON"}
     gen_name = gen_names.get(callback.data)
     if not gen_name:
         await callback.answer("Помилка: Генератор не знайдений")
@@ -206,8 +206,8 @@ async def stop_all_callback(callback: types.CallbackQuery, generator_service: Ge
 async def correction_menu(callback: types.CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="GEN-1 (003)", callback_data="correct_select_GEN-1 (003)"),
-        InlineKeyboardButton(text="GEN-2 (036) WILSON", callback_data="correct_select_GEN-2 (036) WILSON")
+        InlineKeyboardButton(text="GEN-1 (036)", callback_data="correct_select_GEN-1 (036)"),
+        InlineKeyboardButton(text="GEN-2 (003) WILSON", callback_data="correct_select_GEN-2 (003) WILSON")
     )
     builder.row(InlineKeyboardButton(text="🔙 Скасувати", callback_data="gen_status_back")) 
     

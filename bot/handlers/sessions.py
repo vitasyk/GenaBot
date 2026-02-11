@@ -274,6 +274,15 @@ async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot:
                 notes=notes
             )
             
+            # Update individual generator fuel levels and log refueling
+            if generator_service:
+                for name, liters in gen_fuel_data.items():
+                    try:
+                        await generator_service.log_refuel(user_id, name, liters)
+                    except Exception as ge:
+                        import logging
+                        logging.error(f"Failed to log refuel for {name}: {ge}")
+            
             # Confirmation with breakdown
             statuses = await _get_gen_statuses(generator_service)
             gen_list = "\n".join([f"  • {statuses.get(name, '🔴')} {name}: {liters}л" for name, liters in gen_fuel_data.items()])
@@ -341,6 +350,14 @@ async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot:
                 cans=cans,
                 notes=notes
             )
+            
+            # Update generator fuel level and log refueling (single gen flow)
+            if generator_service and gen_choice:
+                try:
+                    await generator_service.log_refuel(user_id, gen_choice, liters)
+                except Exception as ge:
+                    import logging
+                    logging.error(f"Failed to log refuel for {gen_choice}: {ge}")
             
             msg = (
                 f"✅ <b>Сесію # {session_id} завершено!</b>\n\n"

@@ -35,8 +35,8 @@ async def cmd_start(message: types.Message, user_repo: UserRepository):
 @router.message(F.text == "🆘 Інструкція (SOS)")
 async def sos_handler(message: types.Message):
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="GEN-1 (003)", callback_data="sos_gen_1"))
-    builder.row(InlineKeyboardButton(text="GEN-2 (036) WILSON", callback_data="sos_gen_2"))
+    builder.row(InlineKeyboardButton(text="GEN-1 (036)", callback_data="sos_gen_1"))
+    builder.row(InlineKeyboardButton(text="GEN-2 (003) WILSON", callback_data="sos_gen_2"))
     
     await message.answer(
         "🆘 <b>Оберіть генератор для інструкції:</b>", 
@@ -47,8 +47,8 @@ async def sos_handler(message: types.Message):
 @router.callback_query(F.data == "sos_menu")
 async def sos_menu_callback(callback: types.CallbackQuery):
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="GEN-1 (003)", callback_data="sos_gen_1"))
-    builder.row(InlineKeyboardButton(text="GEN-2 (036) WILSON", callback_data="sos_gen_2"))
+    builder.row(InlineKeyboardButton(text="GEN-1 (036)", callback_data="sos_gen_1"))
+    builder.row(InlineKeyboardButton(text="GEN-2 (003) WILSON", callback_data="sos_gen_2"))
     
     await callback.message.edit_text(
         "🆘 <b>Оберіть генератор для інструкції:</b>", 
@@ -59,7 +59,7 @@ async def sos_menu_callback(callback: types.CallbackQuery):
 @router.callback_query(F.data == "sos_gen_1")
 async def sos_gen_1(callback: types.CallbackQuery):
     text = (
-        "🔧 <b>GEN-1 (003)</b>\n\n"
+        "🔧 <b>GEN-1 (036)</b>\n\n"
         "1. Перевірте паливо (бак зліва)\n"
         "2. Переключіть тумблер \"CHOKE\" у положення ON\n"
         "3. Потягніть стартер 3-5 разів різко\n"
@@ -75,7 +75,7 @@ async def sos_gen_1(callback: types.CallbackQuery):
 @router.callback_query(F.data == "sos_gen_2")
 async def sos_gen_2(callback: types.CallbackQuery):
     text = (
-        "🔧 <b>GEN-2 (036) WILSON</b>\n\n"
+        "🔧 <b>GEN-2 (003) WILSON</b>\n\n"
         "1. Переконайтесь що вимикач НЕ на ON\n"
         "2. Натисніть кнопку PRIME 5 разів\n"
         "3. Переключіть вимикач на ON\n"

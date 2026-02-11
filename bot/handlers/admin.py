@@ -243,12 +243,17 @@ async def admin_users_list(callback: types.CallbackQuery, user_repo: UserReposit
     
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel_back"))
     
-    await callback.message.edit_text(
-        "👥 <b>Керування користувачами</b>\n\n"
-        "Оберіть користувача для прив'язки до імені у графіку (Google Sheet).",
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML"
-    )
+    try:
+        await callback.message.edit_text(
+            "👥 <b>Керування користувачами</b>\n\n"
+            "Оберіть користувача для прив'язки до імені у графіку (Google Sheet).",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        import logging
+        logging.warning(f"Failed to edit admin users list: {e}")
+        await callback.answer()
 
 @router.callback_query(F.data == "admin_sheets_workers")
 async def admin_sheets_workers_list(callback: types.CallbackQuery, user_repo: UserRepository):
@@ -288,11 +293,13 @@ async def admin_sheets_workers_list(callback: types.CallbackQuery, user_repo: Us
     
     try:
         await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
-    except TelegramBadRequest as e:
+    except Exception as e:
         if "message is not modified" in str(e):
             await callback.answer("Дані актуальні ✅")
         else:
-            raise
+            import logging
+            logging.warning(f"Failed to edit workers list: {e}")
+            await callback.answer()
 
 @router.callback_query(F.data == "admin_next_workers")
 async def admin_next_workers_handler(callback: types.CallbackQuery, bot: Bot):
