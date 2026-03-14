@@ -23,23 +23,32 @@ class GoogleSheetsService:
             logging.warning(f"Google Sheets init failed: {e}. Will try on first use.")
             self._initialized = False
     
-    def _ensure_init(self):
-        """Lazy initialization of spreadsheet connection"""
-        if not self._initialized and config.SCHEDULE_SPREADSHEET_ID:
-            try:
-                self.spreadsheet = self.client.open_by_key(config.SCHEDULE_SPREADSHEET_ID)
-                
-                # Dynamic worksheet name based on current month
-                # Format: MM'YY (e.g., "02'26" for Feb 2026)
-                now = datetime.now()
-                worksheet_name = now.strftime("%m'%y")
-                
-                self.worksheet = self.spreadsheet.worksheet(worksheet_name)
-                self._initialized = True
-                logging.info(f"✅ Google Sheets connected to worksheet: {worksheet_name}")
-            except Exception as e:
-                logging.error(f"Failed to connect to Google Sheets: {e}")
-                raise
+    def _get_worksheet(self, target_date: date) -> gspread.Worksheet:
+        """Get or open worksheet for specific date"""
+        if not config.SCHEDULE_SPREADSHEET_ID:
+            raise ValueError("SCHEDULE_SPREADSHEET_ID is not configured")
+            
+        if not self.spreadsheet:
+            self.spreadsheet = self.client.open_by_key(config.SCHEDULE_SPREADSHEET_ID)
+            
+        # Format: MM'YY (e.g., "02'26" for Feb 2026)
+        worksheet_name = target_date.strftime("%m'%y")
+        
+        # Simple caching: return current if name matches
+        if self.worksheet and self.worksheet.title == worksheet_name:
+            return self.worksheet
+            
+        try:
+            logging.info(f"Opening worksheet: {worksheet_name}")
+            self.worksheet = self.spreadsheet.worksheet(worksheet_name)
+            return self.worksheet
+        except gspread.WorksheetNotFound:
+            logging.error(f"Worksheet not found: {worksheet_name}")
+            # Try to find any worksheet if the current month is missing as fallback
+            if not self.worksheet:
+                self.worksheet = self.spreadsheet.get_worksheet(0)
+                logging.warning(f"Using first worksheet as fallback: {self.worksheet.title}")
+            raise
     
     def _find_date_column(self, target_date: date, all_values: List[List[str]]) -> Optional[int]:
         """
@@ -86,9 +95,8 @@ class GoogleSheetsService:
         Get workers who start work at specific hour on specific date
         Returns: [(name, phone), ...]
         """
-        self._ensure_init()
-        
-        all_values = self.worksheet.get_all_values()
+        worksheet = self._get_worksheet(target_date)
+        all_values = worksheet.get_all_values()
         
         # Find column for this date
         date_col = self._find_date_column(target_date, all_values)
@@ -187,13 +195,14 @@ class GoogleSheetsService:
 
     def get_all_worker_names(self) -> List[str]:
         """
-        Extract unique worker names from rows 39-60 of the first column.
+        Extract unique worker names from rows 3-60 of the first column.
+        Uses current month's worksheet.
         """
-        self._ensure_init()
         try:
+            worksheet = self._get_worksheet(datetime.now().date())
             # We only need the first column of the specified rows
             # Rows 4-60 (index 3-59)
-            all_values = self.worksheet.get_all_values()
+            all_values = worksheet.get_all_values()
             
             names = set()
             start_row_idx = 3
