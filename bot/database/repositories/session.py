@@ -1,18 +1,20 @@
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import select, update, and_
+
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import RefuelSession, SessionStatus
+from bot.utils.clock import now_kyiv
 
 class SessionRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
-        
-    async def create_session(self, 
-                             start_time: datetime, 
-                             deadline: datetime, 
-                             worker1_id: Optional[int] = None, 
+
+    async def create_session(self,
+                             start_time: datetime,
+                             deadline: datetime,
+                             worker1_id: Optional[int] = None,
                              worker2_id: Optional[int] = None) -> RefuelSession:
         new_session = RefuelSession(
             start_time=start_time,
@@ -25,35 +27,44 @@ class SessionRepository:
         await self.session.commit()
         await self.session.refresh(new_session)
         return new_session
-        
+
     async def get_active_session(self) -> Optional[RefuelSession]:
         """Get current session (pending or in_progress)"""
         stmt = select(RefuelSession).where(
             RefuelSession.status.in_([SessionStatus.pending, SessionStatus.in_progress])
         ).order_by(RefuelSession.start_time.desc()).limit(1)
-        
+
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
-        
+
     async def get_session_by_id(self, session_id: int) -> Optional[RefuelSession]:
         return await self.session.get(RefuelSession, session_id)
-        
-    async def update_status(self, session_id: int, status: SessionStatus) -> Optional[RefuelSession]:
+
+    async def update_status(self,
+                            session_id: int,
+                            status: SessionStatus,
+                            expected_status: SessionStatus | None = None) -> Optional[RefuelSession]:
+        """Sets status. With expected_status, changes only a session currently in that status
+        and returns None otherwise (e.g. an old "start" button on a finished session)."""
         stmt = update(RefuelSession).where(RefuelSession.id == session_id).values(status=status)
-        await self.session.execute(stmt)
+        if expected_status is not None:
+            stmt = stmt.where(RefuelSession.status == expected_status)
+        result = await self.session.execute(stmt)
         await self.session.commit()
+        if result.rowcount == 0:
+            return None
         return await self.get_session_by_id(session_id)
-        
-    async def complete_session(self, 
-                               session_id: int, 
+
+    async def complete_session(self,
+                               session_id: int,
                                completed_by: int,
-                               gen_name: str, 
-                               liters: float, 
-                               cans: float, 
-                               notes: str = None) -> Optional[RefuelSession]:
+                               gen_name: str,
+                               liters: float,
+                               cans: float,
+                               notes: str | None = None) -> Optional[RefuelSession]:
         stmt = update(RefuelSession).where(RefuelSession.id == session_id).values(
             status=SessionStatus.completed,
-            end_time=datetime.utcnow(),
+            end_time=now_kyiv(),
             completed_by=completed_by,
             gen_name=gen_name,
             liters=liters,
@@ -63,7 +74,7 @@ class SessionRepository:
         await self.session.execute(stmt)
         await self.session.commit()
         return await self.get_session_by_id(session_id)
-        
+
     async def get_history(self, limit: int = 10) -> List[RefuelSession]:
         stmt = select(RefuelSession).order_by(RefuelSession.start_time.desc()).limit(limit)
         result = await self.session.execute(stmt)

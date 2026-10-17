@@ -1,24 +1,20 @@
+from typing import Sequence
+
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-def get_refuel_kb() -> InlineKeyboardMarkup:
-    buttons = [
-        [
-            InlineKeyboardButton(text="GEN-1 (003)", callback_data="refuel_select_GEN-1 (003)"),
-            InlineKeyboardButton(text="GEN-2 (038)", callback_data="refuel_select_GEN-2 (038)")
-        ],
-        [InlineKeyboardButton(text="❌ Закрити", callback_data="refuel_close")]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+from bot.database.models import Generator
+from bot.keyboards.callbacks import RefuelAmountCallback
+from bot.keyboards.inline_kb import get_generator_select_kb
 
-def get_amount_kb(gen_name: str) -> InlineKeyboardMarkup:
+def get_refuel_kb(generators: Sequence[Generator]) -> InlineKeyboardMarkup:
+    return get_generator_select_kb(generators, "refuel", "❌ Закрити", "refuel_close")
+
+def get_amount_kb(gen_id: int) -> InlineKeyboardMarkup:
+    def amount_button(text: str, liters: int) -> InlineKeyboardButton:
+        return InlineKeyboardButton(text=text, callback_data=RefuelAmountCallback(gen_id=gen_id, liters=liters).pack())
+
     buttons = [
-        [
-            InlineKeyboardButton(text="Повна (20л)", callback_data=f"refuel_confirm_{gen_name}_20"),
-            InlineKeyboardButton(text="Половина (10л)", callback_data=f"refuel_confirm_{gen_name}_10")
-        ],
-        [
-            InlineKeyboardButton(text="5L", callback_data=f"refuel_confirm_{gen_name}_5"),
-            InlineKeyboardButton(text="🔙 Назад", callback_data="fuel_back")
-        ]
+        [amount_button("Повна (20л)", 20), amount_button("Половина (10л)", 10)],
+        [amount_button("5L", 5), InlineKeyboardButton(text="🔙 Назад", callback_data="fuel_back")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)

@@ -16,3 +16,7 @@ class SessionStates(StatesGroup):
 class AdminStates(StatesGroup):
     waiting_for_check_interval = State()
     waiting_for_sheet_name = State()
+    waiting_for_manual_hours = State()
+    waiting_for_queue_number = State()
+    waiting_for_generator_name = State()
+    waiting_for_generator_instructions = State()

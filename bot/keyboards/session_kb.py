@@ -1,4 +1,9 @@
+from typing import Sequence
+
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+from bot.database.models import Generator
+from bot.keyboards.callbacks import ALL_GENERATORS_ID, GenCallback
 
 def get_start_session_kb(session_id: int) -> InlineKeyboardMarkup:
     """Keyboard for 'Start Refueling' notification"""
@@ -14,15 +19,17 @@ def get_in_progress_kb(session_id: int) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
-def get_gen_choice_kb() -> InlineKeyboardMarkup:
-    """Keyboard for choosing generator"""
-    # TODO: Fetch dynamic generator names from DB if possible?
-    # For now hardcode common names or use generic
+def get_gen_choice_kb(generators: Sequence[Generator]) -> InlineKeyboardMarkup:
+    """Keyboard for choosing which generator was refueled"""
     kb = [
-        [InlineKeyboardButton(text="GEN-003 (Великий)", callback_data="gen_choice:GEN-003")],
-        [InlineKeyboardButton(text="GEN-038 (Малий)", callback_data="gen_choice:GEN-038")],
-        [InlineKeyboardButton(text="Обидва", callback_data="gen_choice:both")],
+        [InlineKeyboardButton(text=g.name, callback_data=GenCallback(action="session", gen_id=g.id).pack())]
+        for g in generators
     ]
+    if len(generators) > 1:
+        kb.append([InlineKeyboardButton(
+            text="Усі",
+            callback_data=GenCallback(action="session", gen_id=ALL_GENERATORS_ID).pack()
+        )])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 def get_skip_kb() -> InlineKeyboardMarkup:

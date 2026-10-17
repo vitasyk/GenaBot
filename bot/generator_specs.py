@@ -1,20 +1,7 @@
-from pydantic import BaseModel
+LITERS_PER_CAN = 20
 
-class GeneratorSpec(BaseModel):
-    name: str
-    tank_capacity: float  # Liters
-    consumption_rate: float  # Liters per hour
+# Specs for a generator added from the admin panel; admins change them via "🔧 Корегування"
+DEFAULT_TANK_CAPACITY = 40.0
+DEFAULT_CONSUMPTION_RATE = 2.0
 
-# Define specs for each generator (Initial default values)
-GENERATOR_SPECS = {
-    "GEN-1 (003)": GeneratorSpec(
-        name="GEN-1 (003)",
-        tank_capacity=40.0,
-        consumption_rate=2.0
-    ),
-    "GEN-2 (038)": GeneratorSpec(
-        name="GEN-2 (038)",
-        tank_capacity=40.0,
-        consumption_rate=2.0
-    )
-}
+MAX_GENERATOR_NAME_LENGTH = 32

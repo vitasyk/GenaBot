@@ -1,8 +1,10 @@
 from datetime import datetime
 from enum import Enum
-from sqlalchemy import BigInteger, String, DateTime, ForeignKey, Integer, Float, Date
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy import BigInteger, Boolean, String, DateTime, ForeignKey, Integer, Float, true
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.ext.asyncio import AsyncAttrs
+
+from bot.utils.clock import now_kyiv
 
 class Base(AsyncAttrs, DeclarativeBase):
     pass
@@ -58,6 +60,9 @@ class Generator(Base):
     consumption_rate: Mapped[float] = mapped_column(Float, default=2.0)
     total_hours_run: Mapped[float] = mapped_column(Float, default=0.0)
     last_maintenance: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    # Inactive generators are hidden from start/stop/refuel menus but keep their history
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
+    instructions: Mapped[str] = mapped_column(String, nullable=True)  # SOS start-up text
 
 class LogEvent(Base):
     __tablename__ = "logs"
@@ -66,19 +71,7 @@ class LogEvent(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     action: Mapped[str] = mapped_column(String)
     details: Mapped[str] = mapped_column(String, nullable=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-class WorkerShift(Base):
-    __tablename__ = "worker_shifts"
-    
-    id: Mapped[int] = mapped_column(primary_key=True)
-    date: Mapped[datetime] = mapped_column(Date)
-    shift_number: Mapped[int] = mapped_column(Integer)  # 1 or 2
-    worker1_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    worker2_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    start_time: Mapped[str] = mapped_column(String)  # "08:00"
-    end_time: Mapped[str] = mapped_column(String)    # "20:00"
-    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=now_kyiv)
 
 class RefuelSession(Base):
     __tablename__ = "refuel_sessions"
@@ -99,5 +92,5 @@ class RefuelSession(Base):
     cans: Mapped[float] = mapped_column(Float, nullable=True)
     notes: Mapped[str] = mapped_column(String, nullable=True)
     
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_kyiv)
     completed_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
