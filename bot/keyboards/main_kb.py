@@ -1,13 +1,17 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
+_ROWS = [
+    ["⛽ Заправити", "📦 Склад"],
+    ["⚡ Статус", "🌡️ Прогноз", "📉 Графік"],
+    ["🆘 Інструкція (SOS)", "🔄 Керування"],
+]
+_ADMIN_ROW = ["📊 Адмін-панель"]
+
+# Texts of the reply-keyboard buttons: text-input steps treat them as "cancel".
+MENU_BUTTONS = frozenset(text for row in [*_ROWS, _ADMIN_ROW] for text in row)
+
+
 def get_main_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
-    buttons = [
-        [KeyboardButton(text="⛽ Заправити"), KeyboardButton(text="📦 Склад")],
-        [KeyboardButton(text="⚡ Статус"), KeyboardButton(text="🌡️ Прогноз"), KeyboardButton(text="📉 Графік")],
-        [KeyboardButton(text="🆘 Інструкція (SOS)")]
-    ]
-    
-    if is_admin:
-        buttons.append([KeyboardButton(text="🔄 Керування"), KeyboardButton(text="📊 Адмін-панель")])
-        
+    rows = [*_ROWS, _ADMIN_ROW] if is_admin else _ROWS
+    buttons = [[KeyboardButton(text=text) for text in row] for row in rows]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)

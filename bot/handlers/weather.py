@@ -1,9 +1,7 @@
 from aiogram import Router, F, types
-from aiogram import Router, F, types
 from bot.services.weather import WeatherService
 from bot.services.generator import GeneratorService
 from bot.services.inventory import InventoryService
-from bot.database.models import GenStatus
 
 router = Router()
 
@@ -90,7 +88,7 @@ async def weather_forecast(message: types.Message, weather_service: WeatherServi
         # Coverage Estimation
         days_coverage = stock_liters / (total_projected_consumption_24h / 5) # avg daily usage
         
-        text += f"📊 <b>Аналіз запасів:</b>\n"
+        text += "📊 <b>Аналіз запасів:</b>\n"
         text += f"При безперервній роботі ({base_hourly_consumption}л/год + погода):\n"
         text += f"🏁 Вистачить на: ~<b>{days_coverage:.1f} днів</b>"
         

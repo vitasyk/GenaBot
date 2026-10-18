@@ -1,4 +1,4 @@
-from sqlalchemy import select, update
+from sqlalchemy import select
 from bot.database.repositories.base import BaseRepository
 from bot.database.models import Inventory
 
@@ -22,8 +22,9 @@ class InventoryRepository(BaseRepository[Inventory]):
         Updates stock by `change`. Can be positive (add) or negative (remove).
         Returns new stock level.
         """
-        # We assume there is only one row in inventory for simplicity as per TZ
-        stmt = select(Inventory).limit(1)
+        # We assume there is only one row in inventory for simplicity as per TZ.
+        # Lock it (and refresh the cached copy) so concurrent updates are not lost.
+        stmt = select(Inventory).limit(1).with_for_update().execution_options(populate_existing=True)
         result = await self.session.execute(stmt)
         inventory = result.scalar_one_or_none()
         

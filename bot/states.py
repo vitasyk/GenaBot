@@ -13,7 +13,6 @@ class RefuelAccumulatorStates(StatesGroup):
 
 class SessionStates(StatesGroup):
     selecting_generators = State()
-    waiting_for_generator = State()
     waiting_for_liters = State()
     waiting_for_antigel = State()
     waiting_for_notes = State()
@@ -21,6 +20,8 @@ class SessionStates(StatesGroup):
 class AdminStates(StatesGroup):
     waiting_for_check_interval = State()
     waiting_for_sheet_name = State()
+    waiting_for_gen_name = State()
+    waiting_for_gen_instructions = State()
 
 class ScheduleStates(StatesGroup):
     """States for manual schedule entry"""

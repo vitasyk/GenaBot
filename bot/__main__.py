@@ -34,24 +34,16 @@ async def main():
     # Register middlewares
     from bot.database.main import session_maker
     from bot.middlewares.di import DbSessionMiddleware
+    from bot.middlewares.access import AccessMiddleware
     
     from bot.services.notifier import NotifierService
     notifier = NotifierService(bot)
     
     dp.update.middleware(DbSessionMiddleware(session_maker, redis_client, notifier))
+    # Runs after DbSessionMiddleware (needs user_repo): blocks blocked/unknown users
+    dp.message.outer_middleware(AccessMiddleware())
+    dp.callback_query.outer_middleware(AccessMiddleware())
     
-    # Run DB Init/Renaming
-    from bot.services.generator import GeneratorService
-    from bot.database.repositories.generator import GeneratorRepository
-    from bot.database.repositories.logs import LogRepository
-
-
-    async with session_maker() as session:
-        gen_repo = GeneratorRepository(session)
-        log_repo = LogRepository(session)
-        service = GeneratorService(gen_repo, log_repo, notifier, redis_client)
-        await service.rename_generators_init()
-        await session.commit()    
     # Register routers
     from bot.handlers import common, inventory, generators, weather, admin, sessions, schedule
     

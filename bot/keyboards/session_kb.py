@@ -1,4 +1,9 @@
+from collections.abc import Sequence
+
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+from bot.database.models import Generator
+from bot.keyboards.inline_kb import GenCb, status_icon
 
 def get_start_session_kb(session_id: int) -> InlineKeyboardMarkup:
     """Keyboard for 'Start Refueling' notification"""
@@ -14,33 +19,18 @@ def get_in_progress_kb(session_id: int) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
-def get_gen_selection_kb(selected_gens: list[str] = None, statuses: dict = None) -> InlineKeyboardMarkup:
+def get_gen_selection_kb(gens: Sequence[Generator], selected_gens: list[str]) -> InlineKeyboardMarkup:
     """
-    Keyboard with toggle checkboxes for generator selection
-    selected_gens: list of generator names currently selected
-    statuses: {gen_name: status_emoji}
+    Toggle keyboard for choosing refuelled generators.
+    gens: active generators; selected_gens: names already chosen (kept in FSM by name).
     """
-    if selected_gens is None:
-        selected_gens = []
-    
-    kb = []
-    # Status icons default to stopped if missing
-    s1 = statuses.get("GEN-1 (036)", "🔴") if statuses else "🔴"
-    s2 = statuses.get("GEN-2 (003) WILSON", "🔴") if statuses else "🔴"
-
-    gens = [
-        (f"{s1} GEN-1 (036)", "GEN-1 (036)", ""),
-        (f"{s2} GEN-2 (003) WILSON", "GEN-2 (003) WILSON", "")
+    kb = [
+        [InlineKeyboardButton(
+            text=f"{'✅ ' if g.name in selected_gens else ''}{status_icon(g.status)} {g.name}",
+            callback_data=GenCb(action="toggle", id=g.id).pack()
+        )]
+        for g in gens
     ]
-    
-    for display_name, internal_name, label in gens:
-        is_selected = internal_name in selected_gens
-        # Remove checkbox icons as requested by user
-        text = f"{'✅ ' if is_selected else ''}{display_name}"
-        kb.append([InlineKeyboardButton(
-            text=text,
-            callback_data=f"toggle_gen:{internal_name}"
-        )])
     
     # Add "Continue" button only if at least one is selected
     if selected_gens:
@@ -49,18 +39,6 @@ def get_gen_selection_kb(selected_gens: list[str] = None, statuses: dict = None)
             callback_data="gen_confirm"
         )])
     
-    return InlineKeyboardMarkup(inline_keyboard=kb)
-
-def get_gen_choice_kb(statuses: dict = None) -> InlineKeyboardMarkup:
-    """Keyboard for choosing generator (DEPRECATED - use get_gen_selection_kb)"""
-    s1 = statuses.get("GEN-1 (036)", "🔴") if statuses else "🔴"
-    s2 = statuses.get("GEN-2 (003) WILSON", "🔴") if statuses else "🔴"
-    
-    kb = [
-        [InlineKeyboardButton(text=f"{s1} GEN-1 (036)", callback_data="gen_choice:GEN-1 (036)")],
-        [InlineKeyboardButton(text=f"{s2} GEN-2 (003) WILSON", callback_data="gen_choice:GEN-2 (003) WILSON")],
-        [InlineKeyboardButton(text="Обидва", callback_data="gen_choice:both")],
-    ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 def get_skip_kb() -> InlineKeyboardMarkup:

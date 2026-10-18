@@ -1,5 +1,5 @@
 from typing import Callable, Dict, Any, Awaitable
-from aiogram import BaseMiddleware, Bot
+from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from redis.asyncio import Redis

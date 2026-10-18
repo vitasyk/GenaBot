@@ -1,5 +1,5 @@
 """Schedule repository for managing manual schedule entries"""
-from datetime import date, datetime
+from datetime import date
 from typing import List, Optional
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession

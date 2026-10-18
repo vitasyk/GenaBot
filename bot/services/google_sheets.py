@@ -1,7 +1,7 @@
 import gspread
 from google.oauth2.service_account import Credentials
 from bot.config import config
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, date, timedelta
 from typing import Optional, List, Tuple
 import logging
 import re

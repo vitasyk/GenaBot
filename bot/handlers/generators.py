@@ -3,9 +3,14 @@ import logging
 from aiogram.fsm.context import FSMContext
 from bot.states import GenStates
 from bot.services.generator import GeneratorService
-from bot.keyboards.inline_kb import get_generator_control_kb
-from bot.database.models import GenStatus, UserRole
-from bot.database.repositories.user import UserRepository
+from bot.keyboards.inline_kb import (
+    STALE_MENU_TEXT,
+    GenCb,
+    get_generator_control_kb,
+    get_generator_pick_kb,
+)
+from bot.keyboards.main_kb import MENU_BUTTONS
+from bot.database.models import GenStatus
 from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
 
 router = Router()
@@ -85,17 +90,9 @@ async def _get_status_panel(generator_service: GeneratorService, with_keyboard: 
             
         text += "\n"
     text += "➖➖➖➖➖➖➖➖➖➖"
-    
-    # Map statuses to emojis for the keyboard
-    status_map = {}
-    for g in gens:
-        icon = "🔴"
-        if g.status == GenStatus.running: icon = "🟢"
-        elif g.status == GenStatus.standby: icon = "🟡"
-        status_map[g.name] = icon
 
-    kb = get_generator_control_kb(statuses=status_map, exclude_correction=exclude_correction, exclude_stop_all=exclude_correction) if with_keyboard else None
-    
+    kb = get_generator_control_kb(gens, exclude_correction=exclude_correction, exclude_stop_all=exclude_correction) if with_keyboard else None
+
     if kb:
         # Add Notification Toggle Button
         notify_status = await generator_service.get_notify_start_status()
@@ -141,33 +138,36 @@ async def check_status(message: types.Message, generator_service: GeneratorServi
 async def back_to_status_callback(callback: types.CallbackQuery, generator_service: GeneratorService):
     text, kb = await _get_status_panel(generator_service, exclude_correction=True)
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    await callback.answer()
 
 @router.message(F.text == "🔄 Керування")
-async def switch_gen_menu(message: types.Message, user_repo: UserRepository, generator_service: GeneratorService):
-    from bot.config import config
-    if message.from_user.id not in config.ADMIN_IDS:
-        await message.answer("⛔ Ця функція доступна тільки адміністраторам.")
-        return
-
-    # Fetch statuses for keyboard
+async def switch_gen_menu(message: types.Message, generator_service: GeneratorService):
     gens = await generator_service.get_status()
-    status_map = {}
-    for g in gens:
-        icon = "🔴"
-        if g.status == GenStatus.running: icon = "🟢"
-        elif g.status == GenStatus.standby: icon = "🟡"
-        status_map[g.name] = icon
+    await message.answer("Оберіть дію:", reply_markup=get_generator_control_kb(gens), parse_mode="HTML")
 
-    await message.answer("Оберіть дію:", reply_markup=get_generator_control_kb(statuses=status_map), parse_mode="HTML")
+# Buttons sent before generators moved to the DB carry names/positions instead of ids.
+_STALE_PREFIXES = (
+    "start_gen_", "standby_gen_", "correct_select_", "refuel_select_", "refuel_confirm_",
+    "sos_gen_", "toggle_gen:", "gen_choice:", "antigel_reset_",
+)
 
-@router.callback_query(F.data.startswith("start_gen_"))
-async def start_generator_callback(callback: types.CallbackQuery, generator_service: GeneratorService):
-    gen_names = {"start_gen_1": "GEN-1 (036)", "start_gen_2": "GEN-2 (003) WILSON"}
-    gen_name = gen_names.get(callback.data)
-    if not gen_name:
-        await callback.answer("Помилка: Генератор не знайдений")
+@router.callback_query(F.data.startswith(_STALE_PREFIXES))
+async def stale_generator_button(callback: types.CallbackQuery):
+    await callback.answer(STALE_MENU_TEXT, show_alert=True)
+
+async def _active_gen_or_alert(callback: types.CallbackQuery, generator_service: GeneratorService, gen_id: int):
+    gen = await generator_service.get_active(gen_id)
+    if not gen:
+        await callback.answer(STALE_MENU_TEXT, show_alert=True)
+    return gen
+
+@router.callback_query(GenCb.filter(F.action == "start"))
+async def start_generator_callback(callback: types.CallbackQuery, callback_data: GenCb, generator_service: GeneratorService):
+    gen = await _active_gen_or_alert(callback, generator_service, callback_data.id)
+    if not gen:
         return
-        
+    gen_name = gen.name
+
     # Check for warming recommendation
     warm_rec = await generator_service.get_warming_recommendation(gen_name)
     warning_text = ""
@@ -180,14 +180,13 @@ async def start_generator_callback(callback: types.CallbackQuery, generator_serv
     await callback.message.edit_text(text + warning_text, reply_markup=kb, parse_mode="HTML")
     await callback.answer(f"✅ {gen_name} запущено!")
 
-@router.callback_query(F.data.startswith("standby_gen_"))
-async def standby_generator_callback(callback: types.CallbackQuery, generator_service: GeneratorService):
-    gen_names = {"standby_gen_1": "GEN-1 (036)", "standby_gen_2": "GEN-2 (003) WILSON"}
-    gen_name = gen_names.get(callback.data)
-    if not gen_name:
-        await callback.answer("Помилка: Генератор не знайдений")
+@router.callback_query(GenCb.filter(F.action == "standby"))
+async def standby_generator_callback(callback: types.CallbackQuery, callback_data: GenCb, generator_service: GeneratorService):
+    gen = await _active_gen_or_alert(callback, generator_service, callback_data.id)
+    if not gen:
         return
-        
+    gen_name = gen.name
+
     await generator_service.set_standby(callback.from_user.id, gen_name)
     
     text, kb = await _get_status_panel(generator_service, exclude_correction=True)
@@ -203,31 +202,20 @@ async def stop_all_callback(callback: types.CallbackQuery, generator_service: Ge
     await callback.answer("🛑 Всі генератори зупинено!")
 
 @router.callback_query(F.data == "correct_fuel_menu")
-async def correction_menu(callback: types.CallbackQuery):
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="GEN-1 (036)", callback_data="correct_select_GEN-1 (036)"),
-        InlineKeyboardButton(text="GEN-2 (003) WILSON", callback_data="correct_select_GEN-2 (003) WILSON")
-    )
-    builder.row(InlineKeyboardButton(text="🔙 Скасувати", callback_data="gen_status_back")) 
-    
-    await callback.message.edit_text("🔧 <b>Корегування</b>\nОберіть генератор:", reply_markup=builder.as_markup(), parse_mode="HTML")
+async def correction_menu(callback: types.CallbackQuery, generator_service: GeneratorService):
+    gens = await generator_service.get_status()
+    back = InlineKeyboardButton(text="🔙 Скасувати", callback_data="gen_status_back")
+    kb = get_generator_pick_kb(gens, "correct", footer=back)
+    await callback.message.edit_text("🔧 <b>Корегування</b>\nОберіть генератор:", reply_markup=kb, parse_mode="HTML")
+    await callback.answer()
 
-@router.callback_query(F.data == "gen_status_back")
-async def back_to_status_callback(callback: types.CallbackQuery, generator_service: GeneratorService):
-    text, kb = await _get_status_panel(generator_service, exclude_correction=True)
-    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-
-@router.callback_query(F.data.startswith("correct_select_"))
-async def correct_options(callback: types.CallbackQuery, state: FSMContext, generator_service: GeneratorService):
-    gen_name = callback.data.split("_")[2]
-    await state.update_data(gen_name=gen_name)
-    
-    # Fetch current specs
-    gen = await generator_service.repo.get_by_name(gen_name)
+@router.callback_query(GenCb.filter(F.action == "correct"))
+async def correct_options(callback: types.CallbackQuery, callback_data: GenCb, state: FSMContext, generator_service: GeneratorService):
+    gen = await _active_gen_or_alert(callback, generator_service, callback_data.id)
     if not gen:
-        await callback.answer("Генератор не знайдено")
         return
+    gen_name = gen.name
+    await state.update_data(gen_name=gen_name)
 
     text = f"⚙️ <b>{gen_name}</b>\n"
     text += "➖➖➖➖➖➖➖➖➖➖\n"
@@ -238,6 +226,7 @@ async def correct_options(callback: types.CallbackQuery, state: FSMContext, gene
     text += "Що хочете змінити?"
     
     await callback.message.edit_text(text, reply_markup=_get_correction_keyboard(), parse_mode="HTML")
+    await callback.answer()
 
 @router.callback_query(F.data.startswith("correct_mode_"))
 async def correct_init(callback: types.CallbackQuery, state: FSMContext, generator_service: GeneratorService):
@@ -269,7 +258,7 @@ async def correct_init(callback: types.CallbackQuery, state: FSMContext, generat
 @router.message(GenStates.waiting_for_fuel_amount)
 async def process_correction_fuel(message: types.Message, state: FSMContext, generator_service: GeneratorService):
     # Check if user clicked a menu button
-    if message.text in ["⛽ Заправити", "📦 Склад", "⚡ Статус", "🌡️ Прогноз", "🔄 Керування", "🆘 Інструкція (SOS)", "📊 Адмін-панель"]:
+    if message.text in MENU_BUTTONS:
         await state.clear()
         await message.answer("❌ Корегування скасовано. Оберіть пункт меню ще раз.")
         return
@@ -309,7 +298,7 @@ async def process_correction_fuel(message: types.Message, state: FSMContext, gen
 @router.message(GenStates.waiting_for_tank_capacity)
 async def process_correction_tank(message: types.Message, state: FSMContext, generator_service: GeneratorService):
     try:
-        if message.text in ["⛽ Заправити", "📦 Склад", "⚡ Статус", "🌡️ Прогноз", "🔄 Керування", "🆘 Інструкція (SOS)", "📊 Адмін-панель"]:
+        if message.text in MENU_BUTTONS:
             await state.clear()
             await message.answer("❌ Корегування скасовано. Оберіть пункт меню ще раз.")
             return
@@ -338,7 +327,7 @@ async def process_correction_tank(message: types.Message, state: FSMContext, gen
 @router.message(GenStates.waiting_for_consumption_rate)
 async def process_correction_rate(message: types.Message, state: FSMContext, generator_service: GeneratorService):
     try:
-        if message.text in ["⛽ Заправити", "📦 Склад", "⚡ Статус", "🌡️ Прогноз", "🔄 Керування", "🆘 Інструкція (SOS)", "📊 Адмін-панель"]:
+        if message.text in MENU_BUTTONS:
             await state.clear()
             await message.answer("❌ Корегування скасовано. Оберіть пункт меню ще раз.")
             return

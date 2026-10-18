@@ -23,7 +23,7 @@ class WeatherService:
                         return 0.0
                     data = await resp.json()
                     return data["main"]["temp"]
-        except Exception as e:
+        except Exception:
             # logging.error(f"Weather API error: {e}")
             return 0.0
 
@@ -55,7 +55,6 @@ class WeatherService:
                     
                     # Aggregate by day
                     daily_data = {}
-                    from datetime import datetime
                     
                     for item in raw_list:
                         dt_txt = item.get("dt_txt", "")
@@ -127,14 +126,14 @@ class WeatherService:
             is_freezing = min_temp < 0
             is_critical = min_temp < -10
             
-            msg = f"🌡️ <b>Прогноз погоди на сьогодні</b>\n\n"
+            msg = "🌡️ <b>Прогноз погоди на сьогодні</b>\n\n"
             msg += f"Зараз: <b>{current_temp:.1f}°C</b>\n"
             msg += f"Діапазон: {min_temp:.1f}°C ... {max_temp:.1f}°C\n\n"
             
             if is_critical:
-                msg += f"❄️ <b>УВАГА! Сильні морози!</b>\n"
+                msg += "❄️ <b>УВАГА! Сильні морози!</b>\n"
             elif is_freezing:
-                msg += f"🌨️ <b>Очікується мороз.</b>\n"
+                msg += "🌨️ <b>Очікується мороз.</b>\n"
             
             msg += "⚠️ <b>РЕКОМЕНДАЦІЇ:</b>\n"
             if is_freezing:

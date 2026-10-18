@@ -38,10 +38,6 @@ class InventoryService:
              
         return new_amount
 
-    async def take_can(self, user_id: int) -> int:
-        """Legacy helper for 'Take 1 Can' (Other/Loss)"""
-        return await self.take_fuel(user_id, 20)
-
     async def add_cans(self, user_id: int, cans: int) -> int:
         liters = cans * 20
         new_amount = await self.repo.update_stock(liters)

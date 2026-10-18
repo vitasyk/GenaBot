@@ -1,9 +1,8 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
 from bot.database.repositories.generator import GeneratorRepository
 from bot.database.repositories.logs import LogRepository
 from bot.database.models import Generator, GenStatus
-from bot.generator_specs import GENERATOR_SPECS
 from bot.services.weather import WeatherService
 from bot.services.notifier import NotifierService
 from redis.asyncio import Redis
@@ -18,7 +17,50 @@ class GeneratorService:
         self.NOTIFY_KEY = "settings:notify_gen_start"
 
     async def get_status(self) -> list[Generator]:
+        """Active generators: the ones shown in every menu."""
+        return await self.repo.get_all(active_only=True)
+
+    async def get_all(self) -> list[Generator]:
+        """All generators, including disabled ones (admin list)."""
         return await self.repo.get_all()
+
+    async def get_by_id(self, gen_id: int) -> Generator | None:
+        return await self.repo.get_by_id(gen_id)
+
+    async def get_active(self, gen_id: int) -> Generator | None:
+        """Generator by id, or None if it is missing or disabled."""
+        gen = await self.repo.get_by_id(gen_id)
+        return gen if gen and gen.is_active else None
+
+    async def add_generator(self, user_id: int, name: str) -> Generator | None:
+        """Create an active generator with default specs. None if the name is taken."""
+        if await self.repo.get_by_name(name):
+            return None
+        gen = await self.repo.create(name)
+        await self.logs.log_action(user_id, "ADD_GEN", f"Added generator {name}")
+        return gen
+
+    async def set_active(self, user_id: int, gen_id: int, active: bool) -> Generator | None:
+        """Enable/disable a generator. A running or standby one is stopped first,
+        so its runtime and fuel are accounted."""
+        gen = await self.repo.get_by_id(gen_id)
+        if not gen:
+            return None
+        if not active:
+            if gen.status == GenStatus.running:
+                await self._stop_and_calculate(gen, user_id)
+            elif gen.status == GenStatus.standby:
+                await self.repo.set_status(gen.name, GenStatus.stopped)
+        gen.is_active = active
+        await self.logs.log_action(user_id, "ENABLE_GEN" if active else "DISABLE_GEN", gen.name)
+        return gen
+
+    async def set_instructions(self, user_id: int, gen_id: int, text: str) -> Generator | None:
+        gen = await self.repo.get_by_id(gen_id)
+        if gen:
+            gen.instructions = text
+            await self.logs.log_action(user_id, "UPDATE_SOS", f"Updated SOS instructions for {gen.name}")
+        return gen
 
     async def get_notify_start_status(self) -> bool:
         """Check if global start notifications are enabled"""
@@ -123,13 +165,14 @@ class GeneratorService:
         await self.logs.log_action(user_id, "STOP_GEN", details)
 
     async def log_refuel(self, user_id: int, gen_name: str, liters: float):
-        # 1. Update fuel level
+        # 1. Update fuel level (row is locked inside add_fuel)
         new_level = await self.repo.add_fuel(gen_name, liters)
         
         # 2. Update Anti-Gel counter
         gen = await self.repo.get_by_name(gen_name)
-        if gen:
-            gen.fuel_since_antigel += liters
+        if not gen:
+            raise ValueError(f"Generator {gen_name!r} not found")
+        gen.fuel_since_antigel += liters
             
         await self.logs.log_action(user_id, "REFUEL_GEN", f"Added {liters}L to {gen_name}. New Level: {new_level:.1f}L (Accumulated since Anti-Gel: {gen.fuel_since_antigel:.1f}L)")
 
@@ -138,33 +181,12 @@ class GeneratorService:
         await self.logs.log_action(user_id, "ANTIGEL_ADDED", f"Recorded Anti-Gel addition for {gen_name}")
 
     async def correct_fuel(self, user_id: int, gen_name: str, liters: float):
-        new_level = await self.repo.set_fuel_level(gen_name, liters)
+        await self.repo.set_fuel_level(gen_name, liters)
         await self.logs.log_action(user_id, "CORRECT_FUEL", f"Manual correction for {gen_name}: {liters}L")
 
     async def update_generator_specs(self, user_id: int, name: str, capacity: float, rate: float):
         await self.repo.update_specs(name, capacity, rate)
         await self.logs.log_action(user_id, "UPDATE_SPECS", f"Updated {name}: Cap={capacity}L, Rate={rate}L/h")
-
-    async def rename_generators_init(self):
-        # Migration to standardized names: 
-        # GEN-1 (003) -> GEN-1 (036)
-        await self.repo.rename_generator("GEN-1 (003)", "GEN-1 (036)")
-        
-        # GEN-2 (036) WILSON -> GEN-2 (003) WILSON
-        await self.repo.rename_generator("GEN-2 (036) WILSON", "GEN-2 (003) WILSON")
-
-    async def get_remaining_runtime(self, gen_name: str) -> float:
-        """Returns hours left based on current fuel and consumption rate (weather adjusted)."""
-        gen = await self.repo.get_by_name(gen_name)
-        if not gen or gen.consumption_rate <= 0:
-            return 0.0
-            
-        # Adjust for current weather
-        temp = await self.weather.get_current_temperature()
-        factor = self.weather.get_consumption_factor(temp)
-        adjusted_rate = gen.consumption_rate * factor
-        
-        return gen.fuel_level / adjusted_rate if adjusted_rate > 0 else 0.0
 
     async def get_warming_recommendation(self, gen_name: str) -> str | None:
         """Calculate if generator needs warming based on downtime and temperature."""
@@ -195,7 +217,7 @@ class GeneratorService:
 
     async def check_warming_notifications(self):
         """Proactive check for generators that need warming (run by background job)"""
-        gens = await self.repo.get_all()
+        gens = await self.repo.get_all(active_only=True)
         for g in gens:
             rec = await self.get_warming_recommendation(g.name)
             if rec:
