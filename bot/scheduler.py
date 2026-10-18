@@ -147,9 +147,13 @@ async def weather_check_job(bot: Bot):
 
 async def check_power_outage_job(bot: Bot):
     from bot.services.session_service import SessionService
-    async with session_maker() as session:
-        service = SessionService(session, bot=bot)
-        await service.check_power_outage()
+    redis = Redis.from_url(config.REDIS_URL.get_secret_value())
+    try:
+        async with session_maker() as session:
+            service = SessionService(session, bot=bot, redis=redis)
+            await service.check_power_outage()
+    finally:
+        await redis.close()
 
 async def warming_check_job(bot: Bot):
     from bot.services.generator import GeneratorService

@@ -61,5 +61,13 @@ def get_generator_pick_kb(
     return builder.as_markup()
 
 
+def get_start_generator_kb(gens: Sequence[Generator]) -> InlineKeyboardMarkup:
+    """'Generator started' buttons for the outage warning."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"🟢 Генератор {g.name} запущено", callback_data=GenCb(action="start", id=g.id).pack())]
+        for g in gens
+    ])
+
+
 def get_sos_kb(gens: Sequence[Generator]) -> InlineKeyboardMarkup:
     return get_generator_pick_kb(gens, "sos")

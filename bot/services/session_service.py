@@ -4,26 +4,38 @@ import logging
 import re
 from datetime import datetime, timedelta, time
 from typing import Optional, List
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import config
+from bot.database.repositories.generator import GeneratorRepository
 from bot.database.repositories.session import SessionRepository
 from bot.database.repositories.session_helpers import get_all_workers_for_session, split_workers
 from bot.database.repositories.user import UserRepository
 from bot.database.repositories.schedule import ScheduleRepository
+from bot.keyboards.inline_kb import get_start_generator_kb
 from bot.keyboards.session_kb import get_start_session_kb
 from bot.services.google_sheets import GoogleSheetsService
-from bot.database.models import User, RefuelSession, SessionStatus
+from bot.database.models import GenStatus, User, RefuelSession, SessionStatus
 from bot.services.notifier import NotifierService
 from bot.utils.clock import now_local
 
+# Outage warning goes out this long after the scheduled start, so power that is cut a bit late still counts
+OUTAGE_WARNING_DELAY = timedelta(minutes=5)
+# A bot restart later than this into the outage doesn't send a stale warning
+OUTAGE_WARNING_WINDOW = timedelta(hours=1)
+OUTAGE_WARNED_KEY = "outage:warned:{start}"
+
 class SessionService:
-    def __init__(self, session: AsyncSession, bot=None):
+    def __init__(self, session: AsyncSession, bot=None, redis: Redis | None = None):
         self.repo = SessionRepository(session)
         self.user_repo = UserRepository(session)
         self.schedule_repo = ScheduleRepository(session)
+        self.gen_repo = GeneratorRepository(session)
         self.sheets_service = GoogleSheetsService()
         self.notifier = NotifierService(bot) if bot else None
+        # Remembers which outage warnings were sent; without it (admin force check) no warnings are sent
+        self.redis = redis
 
     async def _get_workers_from_sheets(self, lookup_dt: datetime) -> list[tuple[str, str]]:
         # gspread is blocking: keep it off the event loop
@@ -81,10 +93,14 @@ class SessionService:
 
         # 3. Analyze each block for "Power Return" events
         for block in blocks:
-            # block_start = block[0]
             block_end = block[-1]
             deadline = block_end + timedelta(hours=1)
-            
+
+            # --- Condition B: Outage started -> ask to mark the generator as running ---
+            warn_at = block[0] + OUTAGE_WARNING_DELAY
+            if warn_at <= now < min(warn_at + OUTAGE_WARNING_WINDOW, deadline):
+                await self._warn_outage_started(block[0], deadline)
+
             # --- Condition A: Outage Transition (Power Return) ---
             # Trigger if we are at or past the deadline, but within a 'catch-up' window (e.g. 60 mins)
             # This is the PRIMARY trigger for refueling sessions.
@@ -99,6 +115,30 @@ class SessionService:
                 return await self._create_outage_session(block[0], deadline)
 
         return None
+
+    async def _warn_outage_started(self, block_start: datetime, power_back: datetime) -> None:
+        """Once per outage: tell workers on shift the power should be off and ask them to mark the
+        generator as started. Skipped when a generator is already running."""
+        if not self.notifier or not self.redis:
+            return
+        gens = await self.gen_repo.get_all(active_only=True)
+        if not gens or any(g.status == GenStatus.running for g in gens):
+            return
+        key = OUTAGE_WARNED_KEY.format(start=block_start.isoformat())
+        if not await self.redis.set(key, 1, ex=int(timedelta(days=2).total_seconds()), nx=True):
+            return
+
+        worker_ids, worker_tags = await self._resolve_workers(block_start + OUTAGE_WARNING_DELAY)
+        msg = (f"⚠️ <b>Можливе відключення електрики</b>\n\n"
+               f"За графіком (черга {html.escape(config.QUEUE_NUMBER)}) світло мало зникнути о "
+               f"{block_start.strftime('%H:%M')} (до {power_back.strftime('%H:%M')}).\n"
+               f"Якщо генератор увімкнувся, позначте це кнопкою нижче.")
+        kb = get_start_generator_kb(gens)
+        for worker_id in worker_ids:
+            await self.notifier.notify_user(worker_id, msg, reply_markup=kb)
+        await self.notifier.notify_admins(
+            f"{msg}\n\n👷 Надіслано черговим ({len(worker_ids)}): {', '.join(worker_tags) or 'невідомо'}"
+        )
 
     async def _expire_overdue_session(self, now: datetime) -> None:
         """Reminds once when an open session passes its deadline. The session moves to 'expired'

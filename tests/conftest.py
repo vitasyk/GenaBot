@@ -29,8 +29,11 @@ class FakeRedis:
     async def get(self, key: str) -> bytes | None:
         return self.data.get(key)
 
-    async def set(self, key: str, value, ex=None) -> None:
+    async def set(self, key: str, value, ex=None, nx: bool = False) -> bool | None:
+        if nx and key in self.data:
+            return None
         self.data[key] = value if isinstance(value, bytes) else str(value).encode()
+        return True
 
     async def delete(self, key: str) -> None:
         self.data.pop(key, None)

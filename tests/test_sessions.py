@@ -8,8 +8,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from bot.database.models import SessionStatus
+from bot.database.models import GenStatus, SessionStatus
 from bot.handlers import sessions
+from bot.keyboards.inline_kb import GenCb
 from bot.services.session_service import SessionService
 
 TODAY = date(2026, 10, 18)
@@ -114,6 +115,56 @@ async def test_session_created_when_power_returns_with_correct_worker_links(serv
     # Regression: names and ids were zipped by position, so the unknown worker got Петро's link
     admin_text = service.notifier.notify_admins.call_args.args[0]
     assert "<b>Невідомий</b>" in admin_text and "<a href='tg://user?id=555'>Петро</a>" in admin_text
+
+
+def outage_from_16_to_19(service, gen_status=GenStatus.stopped, redis=None):
+    service.get_outage_timeline_from_db = AsyncMock(return_value=[
+        datetime.combine(TODAY, time(h)) for h in (16, 17, 18)
+    ])
+    service.gen_repo = MagicMock()
+    service.gen_repo.get_all = AsyncMock(return_value=[SimpleNamespace(id=2, name="WILSON", status=gen_status)])
+    service.redis = redis
+
+
+async def test_outage_start_warning_after_grace_with_start_button(service, fake_redis):
+    outage_from_16_to_19(service, redis=fake_redis)
+
+    with at(16, 4):
+        await service.check_power_outage()
+    service.notifier.notify_user.assert_not_called()  # too early: give the power 5 minutes
+
+    with at(16, 5):
+        await service.check_power_outage()
+    with at(16, 6):
+        await service.check_power_outage()  # next scheduler tick must not repeat it
+
+    service.notifier.notify_user.assert_awaited_once()
+    user_id, text = service.notifier.notify_user.call_args.args
+    kb = service.notifier.notify_user.call_args.kwargs["reply_markup"]
+    assert user_id == 555 and "16:00" in text
+    assert kb.inline_keyboard[0][0].callback_data == GenCb(action="start", id=2).pack()
+    service.notifier.notify_admins.assert_awaited_once()
+    service.repo.create_session.assert_not_called()
+
+
+async def test_no_outage_warning_when_generator_already_running(service, fake_redis):
+    outage_from_16_to_19(service, gen_status=GenStatus.running, redis=fake_redis)
+    with at(16, 5):
+        await service.check_power_outage()
+    service.notifier.notify_user.assert_not_called()
+    service.notifier.notify_admins.assert_not_called()
+
+
+async def test_no_outage_warning_without_redis_or_after_power_returns(service, fake_redis):
+    outage_from_16_to_19(service, redis=None)  # admin "force check" has no redis: refuel logic only
+    with at(16, 5):
+        await service.check_power_outage()
+    service.notifier.notify_user.assert_not_called()
+
+    outage_from_16_to_19(service, redis=fake_redis)
+    with at(19, 0):
+        await service.check_power_outage()
+    assert "Світло з'явилося" in service.notifier.notify_user.call_args.args[1]  # only the refuel one
 
 
 async def test_overdue_session_reminds_once_and_expires(service):

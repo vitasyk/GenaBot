@@ -441,7 +441,7 @@ async def process_date_input(message: Message, state: FSMContext, user_repo: Use
     await message.answer(
         f"📅 Дата: <b>{target_date.strftime('%d.%m.%Y')}</b>\n\n"
         "⏰ <b>Введіть періоди відключень</b>\n\n"
-        "Формат: години через тире, періоди через кому\n"
+        "Формат: цілі години через тире (без хвилин), періоди через кому\n"
         "Приклад: <code>0-6, 11-15, 18-23</code>\n\n"
         "Це означає:\n"
         "• 00:00 - 06:00\n"
@@ -494,9 +494,10 @@ async def process_periods_input(message: Message, state: FSMContext, schedule_re
         parts = message.text.split(',')
         for part in parts:
             part = part.strip()
-            match = re.match(r"(\d{1,2})\s*-\s*(\d{1,2})", part)
+            # fullmatch: "18-19:30" must be rejected, not silently read as 18-19
+            match = re.fullmatch(r"(\d{1,2})\s*-\s*(\d{1,2})", part)
             if not match:
-                raise ValueError(f"Невірний формат: {part}")
+                raise ValueError(f"Невірний формат: {part}. Лише цілі години, без хвилин")
             
             start = int(match.group(1))
             end = int(match.group(2))
@@ -511,7 +512,7 @@ async def process_periods_input(message: Message, state: FSMContext, schedule_re
     
     except Exception as e:
         await message.answer(
-            f"❌ Помилка в форматі: {e}\n\n"
+            f"❌ Помилка в форматі: {html.escape(str(e))}\n\n"
             "Приклад: <code>0-6, 11-15, 18-23</code>",
             parse_mode="HTML"
         )

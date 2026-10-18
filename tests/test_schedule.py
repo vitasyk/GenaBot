@@ -61,6 +61,18 @@ async def test_manual_date_without_photo_asks_for_periods():
     assert await state.get_state() == ScheduleStates.waiting_for_periods.state
 
 
+@pytest.mark.parametrize("text", ["18-19:30", "18:20-19", "18<b>-19"])
+async def test_periods_with_minutes_are_rejected_not_truncated(text):
+    # Regression: "18-19:30" was silently read as 18-19
+    state = fsm()
+    await state.set_state(ScheduleStates.waiting_for_periods)
+    msg = message(text)
+    await schedule.process_periods_input(msg, state, schedule_repo=MagicMock(), user_repo=MagicMock())
+    reply = msg.answer.call_args.args[0]
+    assert "Лише цілі години" in reply and "<b>" not in reply
+    assert await state.get_state() == ScheduleStates.waiting_for_periods.state
+
+
 async def test_queue_input_is_validated_and_saved(fake_redis, monkeypatch):
     monkeypatch.setattr(config, "QUEUE_NUMBER", "1.1")
     state = fsm()
