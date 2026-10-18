@@ -15,9 +15,11 @@ from bot.database.repositories.user import UserRepository
 from bot.database.repositories.schedule import ScheduleRepository
 from bot.keyboards.inline_kb import get_start_generator_kb
 from bot.keyboards.session_kb import get_start_session_kb
+from bot.services.antigel import AntigelService, format_advice
 from bot.services.google_sheets import GoogleSheetsService
 from bot.database.models import GenStatus, User, RefuelSession, SessionStatus
 from bot.services.notifier import NotifierService
+from bot.services.weather import WeatherService
 from bot.utils.clock import now_local
 
 # Outage warning goes out this long after the scheduled start, so power that is cut a bit late still counts
@@ -36,6 +38,7 @@ class SessionService:
         self.notifier = NotifierService(bot) if bot else None
         # Remembers which outage warnings were sent; without it (admin force check) no warnings are sent
         self.redis = redis
+        self.antigel = AntigelService(WeatherService(), redis)
 
     async def _get_workers_from_sheets(self, lookup_dt: datetime) -> list[tuple[str, str]]:
         # gspread is blocking: keep it off the event loop
@@ -183,6 +186,7 @@ class SessionService:
                   f"⏰ Період відключення: {fmt_dt(block_start)} - {fmt_dt(deadline)}\n" \
                   f"👷 На зміні були: {tags_str}\n\n" \
                   f"Будь ласка, заправте генератор(и) та завершіть сесію."
+            msg += await self._antigel_hints()
             await self._notify_workers(session, msg)
 
             admin_msg = f"🚀 <b>Створено сесію заправки</b> (ID: {session.id})\n" \
@@ -193,6 +197,15 @@ class SessionService:
             await self.notifier.notify_admins(admin_msg)
 
         return session
+
+    async def _antigel_hints(self) -> str:
+        """Anti-gel reminders for the refuel that is about to happen ("" when none is needed)."""
+        hints = []
+        for gen in await self.gen_repo.get_all(active_only=True):
+            advice = await self.antigel.advise_for(gen)
+            if advice.needed:
+                hints.append(format_advice(gen.name, advice, extra_hint=True))
+        return "".join(f"\n\n{h}" for h in hints)
 
     async def _notify_workers(self, session: RefuelSession, msg: str) -> None:
         kb = get_start_session_kb(session.id)

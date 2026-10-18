@@ -83,7 +83,7 @@ def _service(repo) -> GeneratorService:
 
 async def test_disabling_running_generator_stops_it_and_accounts_fuel():
     gen = _gen(5, "WILSON", GenStatus.running, current_run_start=datetime.utcnow() - timedelta(hours=2))
-    repo = MagicMock(get_by_id=AsyncMock(return_value=gen), add_fuel=AsyncMock(),
+    repo = MagicMock(get_by_id=AsyncMock(return_value=gen), add_fuel=AsyncMock(return_value=16.0),
                      update_total_hours=AsyncMock(), set_status=AsyncMock())
 
     result = await _service(repo).set_active(user_id=1, gen_id=5, active=False)
@@ -104,6 +104,45 @@ async def test_disabling_standby_generator_sets_stopped():
     repo.set_status.assert_awaited_once_with("WILSON", GenStatus.stopped)
     repo.add_fuel.assert_not_awaited()
     assert gen.is_active is False
+
+
+def _stop_repo(*gens, fuel_left: float = 100.0):
+    return MagicMock(get_all=AsyncMock(return_value=list(gens)), add_fuel=AsyncMock(return_value=fuel_left),
+                     update_total_hours=AsyncMock(), set_status=AsyncMock())
+
+
+async def test_stop_reports_runtime_fuel_and_notifies_all_when_enabled():
+    started = datetime.utcnow() - timedelta(hours=2, minutes=41)
+    service = _service(_stop_repo(_gen(5, "WILSON <3>", GenStatus.running, current_run_start=started), fuel_left=101.3))
+    service.redis = MagicMock(get=AsyncMock(return_value=None))  # notifications on by default
+    service.notifier = MagicMock(notify_all=AsyncMock())
+
+    text = await service.stop_all(user_id=1)
+
+    assert "WILSON &lt;3&gt; зупинено" in text
+    assert "2 год 41 хв" in text and "≈5.4 л" in text and "≈101.3 л" in text  # 2.68 h * 2 L/h
+    service.notifier.notify_all.assert_awaited_once_with(text)
+
+
+async def test_standby_report_includes_runtime_and_respects_notify_toggle():
+    gen = _gen(5, "WILSON", GenStatus.running, current_run_start=datetime.utcnow() - timedelta(minutes=30))
+    service = _service(_stop_repo(gen))
+    service.redis = MagicMock(get=AsyncMock(return_value=b"0"))  # notifications switched off
+    service.notifier = MagicMock(notify_all=AsyncMock())
+
+    text = await service.set_standby(user_id=1, name="WILSON")
+
+    assert "30 хв" in text and "ЧЕРГУВАННЯ" in text
+    service.notifier.notify_all.assert_not_awaited()
+
+
+async def test_stop_all_without_running_generator_reports_nothing():
+    service = _service(_stop_repo(_gen(5, "WILSON", GenStatus.standby)))
+    service.redis = MagicMock(get=AsyncMock(return_value=None))
+    service.notifier = MagicMock(notify_all=AsyncMock())
+
+    assert await service.stop_all(user_id=1) == ""
+    service.notifier.notify_all.assert_not_awaited()
 
 
 async def test_get_active_hides_disabled_generator():

@@ -145,6 +145,21 @@ async def weather_check_job(bot: Bot):
     # but daily report covers it for 8 AM. 
     # If we wanted continuous monitoring, we'd add another job.
 
+async def antigel_reminder_job(bot: Bot):
+    """Morning reminder while it's still warm enough for the additive to work."""
+    from bot.services.antigel import AntigelService, format_advice
+    redis = Redis.from_url(config.REDIS_URL.get_secret_value())
+    try:
+        async with session_maker() as session:
+            gens = await GeneratorRepository(session).get_all(active_only=True)
+        antigel = AntigelService(WeatherService(), redis)
+        for g in gens:
+            advice = await antigel.advise_for(g)
+            if advice.needed:
+                await NotifierService(bot).notify_all(format_advice(g.name, advice))
+    finally:
+        await redis.close()
+
 async def check_power_outage_job(bot: Bot):
     from bot.services.session_service import SessionService
     redis = Redis.from_url(config.REDIS_URL.get_secret_value())
@@ -185,6 +200,7 @@ def start_scheduler(bot: Bot):
     
     # Check weather daily at 8:00 AM
     scheduler.add_job(weather_check_job, CronTrigger(hour=8, minute=0), args=[bot])
+    scheduler.add_job(antigel_reminder_job, CronTrigger(hour=8, minute=5), args=[bot])
     
     # Check Power Outage: 1 min by default; the admin-set interval is restored from Redis
     # by restore_scheduler_settings. Explicit ID so it can be rescheduled.

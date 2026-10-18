@@ -81,6 +81,29 @@ async def test_note_with_html_is_escaped_and_state_cleared_first():
     assert await state.get_state() is None
 
 
+async def enter_liters(needed: bool):
+    state = fsm()
+    await state.set_state(sessions.SessionStates.waiting_for_liters)
+    await state.update_data(selected_gens=["WILSON"], current_gen_index=0, gen_fuel_data={})
+    advice = SimpleNamespace(needed=needed, dose_ml=60)
+    generator = MagicMock(get_status=AsyncMock(return_value=[SimpleNamespace(name="WILSON")]))
+    generator.antigel.advise_for = AsyncMock(return_value=advice)
+    msg = message("40")
+    await sessions.liters_input(msg, state, generator)
+    return msg, state
+
+
+async def test_antigel_question_only_when_additive_is_needed():
+    msg, state = await enter_liters(needed=False)
+    assert await state.get_state() == sessions.SessionStates.waiting_for_notes.state
+    assert (await state.get_data())["antigel_added"] is None
+    assert "Антигель" not in msg.answer.call_args.args[0]
+
+    msg, state = await enter_liters(needed=True)
+    assert await state.get_state() == sessions.SessionStates.waiting_for_antigel.state
+    assert "≈60 мл" in msg.answer.call_args.args[0]
+
+
 @pytest.fixture
 def service() -> SessionService:
     service = SessionService(AsyncMock(), bot=AsyncMock())
@@ -92,6 +115,8 @@ def service() -> SessionService:
         id=9, worker1_id=kw["worker1_id"], worker2_id=kw["worker2_id"], worker3_id=kw["worker3_id"],
         additional_workers=kw["additional_workers"]))
     service.notifier = AsyncMock()
+    service.gen_repo = MagicMock(get_all=AsyncMock(return_value=[]))
+    service.antigel = MagicMock(advise_for=AsyncMock(return_value=SimpleNamespace(needed=False)))
     service.sheets_service.get_workers_for_outage = MagicMock(return_value=[("Невідомий", ""), ("Петро", "")])
 
     async def by_name(name):
@@ -165,6 +190,16 @@ async def test_no_outage_warning_without_redis_or_after_power_returns(service, f
     with at(19, 0):
         await service.check_power_outage()
     assert "Світло з'явилося" in service.notifier.notify_user.call_args.args[1]  # only the refuel one
+
+
+async def test_refuel_message_carries_antigel_dose_when_needed(service):
+    outage_from_16_to_19(service)
+    service.antigel.advise_for = AsyncMock(return_value=SimpleNamespace(
+        needed=True, dose_ml=90, untreated_l=90.0, forecast_min=-3.0, too_cold_now=False))
+    with at(19, 0):
+        await service.check_power_outage()
+    text = service.notifier.notify_user.call_args.args[1]
+    assert "Потрібна присадка в WILSON" in text and "≈90 мл" in text
 
 
 async def test_overdue_session_reminds_once_and_expires(service):

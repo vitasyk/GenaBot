@@ -1,4 +1,5 @@
 from aiogram import Router, F, types
+import html
 import logging
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -7,12 +8,15 @@ from bot.database.repositories.user import UserRepository
 from bot.keyboards.inline_kb import STALE_MENU_TEXT, GenCb, status_icon
 from bot.keyboards.refuel_kb import get_refuel_kb, get_refuel_accumulator_kb
 from bot.keyboards.inventory_kb import get_inventory_kb
+from bot.services.antigel import format_advice
 from bot.services.generator import GeneratorService
 from bot.services.inventory import InventoryService
 from aiogram.fsm.context import FSMContext
 from bot.states import RefuelAccumulatorStates
 
 router = Router()
+
+ANTIGEL_WARNING_MARK = "⚠️ УВАГА: ПОТРІБНА ПРИСАДКА!"
 
 REFUEL_PROMPT = "Куди заправляємо?"
 NO_ACTIVE_GENERATORS = "Немає активних генераторів. Адміністратор може увімкнути їх в адмін-панелі → ⚙️ Генератори."
@@ -271,8 +275,9 @@ async def refuel_accumulator_done(callback: types.CallbackQuery, state: FSMConte
         [types.InlineKeyboardButton(text="❌ Закрити", callback_data="refuel_close")]
     ]
     antigel_warning = ""
-    if gen.fuel_since_antigel >= 80:
-        antigel_warning = f"\n\n⚠️ <b>УВАГА: ПОТРІБНА ПРИСАДКА!</b>\nНакопичено <b>{gen.fuel_since_antigel:.1f}л</b> палива. Будь ласка, додайте Anti-Gel!"
+    advice = await generator_service.antigel.advise_for(gen)  # gen already counts the poured litres
+    if advice.needed:
+        antigel_warning = f"\n\n<b>{ANTIGEL_WARNING_MARK}</b>\n{format_advice(gen.name, advice)}"
         kb_buttons.insert(0, [
             types.InlineKeyboardButton(text="✅ Присадку додано", callback_data=GenCb(action="antigel", id=gen.id).pack())
         ])
@@ -311,15 +316,9 @@ async def process_antigel_reset(callback: types.CallbackQuery, callback_data: Ge
 
     # Update message to remove warning
     text = callback.message.text
-    if "⚠️ УВАГА: ПОТРІБНА ПРИСАДКА!" in text:
-        # Simple cleanup of the warning block
-        lines = text.split("\n")
-        new_lines = [l for l in lines if "ПОТРІБНА ПРИСАДКА" not in l and "Накопичено" not in l and "додайте Anti-Gel" not in l]
-        # Remove empty lines at the end
-        while new_lines and not new_lines[-1].strip():
-            new_lines.pop()
-
-        new_text = "\n".join(new_lines) + "\n\n✅ <b>Присадку додано!</b>"
+    if ANTIGEL_WARNING_MARK in text:
+        # The warning block is the tail of the message; message.text is plain, so escape it again
+        new_text = html.escape(text.split(ANTIGEL_WARNING_MARK)[0].rstrip()) + "\n\n✅ <b>Присадку додано!</b>"
 
         await callback.message.edit_text(
             new_text,

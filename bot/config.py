@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     # Slack
     SLACK_WEBHOOK_URL: SecretStr | None = None
     FUEL_THRESHOLD_CANS: float = 2.0
+    # Anti-gel: CFPP of the fuel bought (unknown -> summer diesel, -5) and additive dose per litre
+    FUEL_CFPP_C: float = -5.0
+    ANTIGEL_ML_PER_LITER: float = 1.0
     
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

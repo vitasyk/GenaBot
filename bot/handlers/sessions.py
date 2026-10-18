@@ -21,6 +21,8 @@ from bot.keyboards.session_kb import (
 
 router = Router()
 
+ANTIGEL_ANSWER = {True: "✅ Так", False: "❌ Ні", None: "не потрібен"}
+
 @router.callback_query(F.data.startswith("session_start:"))
 async def start_session_handler(callback: CallbackQuery):
     session_id = int(callback.data.split(":")[1])
@@ -158,12 +160,23 @@ async def liters_input(message: Message, state: FSMContext, generator_service: G
                     parse_mode="HTML"
                 )
             else:
-                # All generators done, ask if Anti-Gel was added
-                await state.update_data(gen_fuel_data=gen_fuel_data)
+                # All generators done: ask about Anti-Gel only when it is needed now
+                await state.update_data(gen_fuel_data=gen_fuel_data, antigel_added=None)  # None: not needed, not asked
                 from bot.keyboards.session_kb import get_antigel_kb
+                hints = []
+                for g in await generator_service.get_status():
+                    if g.name in gen_fuel_data:
+                        advice = await generator_service.antigel.advise_for(
+                            g, extra_liters=gen_fuel_data[g.name], with_current_temp=False)
+                        if advice.needed:
+                            hints.append(f"• {html.escape(g.name)}: ≈{advice.dose_ml} мл")
+                if not hints:
+                    await _ask_notes(message.answer, state)
+                    return
                 await message.answer(
-                    "💉 <b>Ви додавали антигель (Anti-Gel)?</b>\n"
-                    "Це важливо для моніторингу залишку присадки.",
+                    "💉 <b>Потрібна присадка (Anti-Gel)!</b>\n"
+                    + "\n".join(hints)
+                    + "\n\nВи додали присадку?",
                     reply_markup=get_antigel_kb(),
                     parse_mode="HTML"
                 )
@@ -180,9 +193,12 @@ async def liters_input(message: Message, state: FSMContext, generator_service: G
 async def process_antigel(callback: CallbackQuery, state: FSMContext):
     added = callback.data == "antigel:yes"
     await state.update_data(antigel_added=added)
-    
+    await _ask_notes(callback.message.edit_text, state)
+    await callback.answer()
+
+async def _ask_notes(send, state: FSMContext) -> None:
     from bot.keyboards.session_kb import get_skip_kb
-    await callback.message.edit_text(
+    await send(
         "📝 <b>Додати нотатки?</b>\n"
         "(наприклад: 'залив масло', 'були проблеми')\n\n"
         "Якщо немає - натисніть 'Пропустити'.",
@@ -190,7 +206,6 @@ async def process_antigel(callback: CallbackQuery, state: FSMContext):
         parse_mode="HTML"
     )
     await state.set_state(SessionStates.waiting_for_notes)
-    await callback.answer()
 
 @router.callback_query(SessionStates.waiting_for_notes, F.data == "skip_step")
 async def skip_note_callback(callback: CallbackQuery, state: FSMContext, bot: Bot, generator_service: GeneratorService, inventory_service: InventoryService):
@@ -215,7 +230,7 @@ async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot:
         return
 
     user_id = event.from_user.id
-    antigel_added = data.get("antigel_added", False)
+    antigel_added = data.get("antigel_added")
     total_liters = sum(gen_fuel_data.values())
     total_cans = total_liters / 20.0
     gen_summary = ", ".join(f"{name}: {liters}л" for name, liters in gen_fuel_data.items())
@@ -259,7 +274,7 @@ async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot:
         f"👤 Воркер: {html.escape(event.from_user.full_name)}\n"
         f"⚡️ Генератори:\n{gen_list}\n"
         f"⛽️ Всього: {total_liters}л ({total_cans:.1f} кан)\n"
-        f"💉 Антигель: {'✅ Так' if antigel_added else '❌ Ні'}\n"
+        f"💉 Антигель: {ANTIGEL_ANSWER[antigel_added]}\n"
         f"🕒 Час: {completed_session.end_time.strftime('%H:%M')}"
     )
     if new_stock_cans is not None:

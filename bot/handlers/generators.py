@@ -46,8 +46,11 @@ async def _get_status_panel(generator_service: GeneratorService, with_keyboard: 
             status_icon = "🔴"
             status_text = "ЗУПИНЕНО"
         
-        antigel_icon = " ❄️" if g.fuel_since_antigel >= 80 else ""
+        antigel = await generator_service.antigel.advise_for(g, with_current_temp=False)
+        antigel_icon = " ❄️" if antigel.needed else ""
         text += f"{status_icon} <b>{g.name}</b>{antigel_icon}: {status_text}\n"
+        if antigel.needed:
+            text += f"   💉 <b>Потрібна присадка:</b> ≈{antigel.dose_ml} мл\n"
         
         # Runtime prediction
         hours_left = (g.fuel_level / adj_rate) if adj_rate > 0 else 0
@@ -187,18 +190,18 @@ async def standby_generator_callback(callback: types.CallbackQuery, callback_dat
         return
     gen_name = gen.name
 
-    await generator_service.set_standby(callback.from_user.id, gen_name)
-    
+    report = await generator_service.set_standby(callback.from_user.id, gen_name)
+
     text, kb = await _get_status_panel(generator_service, exclude_correction=True)
-    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    await callback.message.edit_text(f"{report}\n\n{text}", reply_markup=kb, parse_mode="HTML")
     await callback.answer(f"🟡 {gen_name} в режимі очікування!")
 
 @router.callback_query(F.data == "stop_all_gens")
 async def stop_all_callback(callback: types.CallbackQuery, generator_service: GeneratorService):
-    await generator_service.stop_all(callback.from_user.id)
-    
+    report = await generator_service.stop_all(callback.from_user.id)
+
     text, kb = await _get_status_panel(generator_service, exclude_correction=True)
-    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    await callback.message.edit_text(f"{report}\n\n{text}" if report else text, reply_markup=kb, parse_mode="HTML")
     await callback.answer("🛑 Всі генератори зупинено!")
 
 @router.callback_query(F.data == "correct_fuel_menu")
