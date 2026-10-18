@@ -1,47 +1,42 @@
 from aiogram import Router, F, types
 import logging
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
-from bot.database.models import UserRole, GenStatus
 from bot.database.repositories.user import UserRepository
-from bot.keyboards.refuel_kb import get_refuel_kb, get_amount_kb
+from bot.keyboards.inline_kb import STALE_MENU_TEXT, GenCb, status_icon
+from bot.keyboards.refuel_kb import get_refuel_kb, get_refuel_accumulator_kb
 from bot.keyboards.inventory_kb import get_inventory_kb
 from bot.services.generator import GeneratorService
 from bot.services.inventory import InventoryService
 from aiogram.fsm.context import FSMContext
-from bot.states import InventoryStates, RefuelAccumulatorStates
+from bot.states import RefuelAccumulatorStates
 
 router = Router()
 
-@router.message(F.text == "📦 Склад")
-async def check_stock(message: types.Message, inventory_service: InventoryService, user_repo: UserRepository):
-    from bot.config import config
-    is_admin = message.from_user.id in config.ADMIN_IDS
-    
+REFUEL_PROMPT = "Куди заправляємо?"
+NO_ACTIVE_GENERATORS = "Немає активних генераторів. Адміністратор може увімкнути їх в адмін-панелі → ⚙️ Генератори."
+
+
+async def _stock_text(inventory_service: InventoryService) -> str:
+    """Stock overview shown by "📦 Склад" and every screen that returns to it."""
     stats = await inventory_service.get_detailed_stats()
-    
-    stock_liters = stats["stock_liters"]
-    stock_cans = stats["stock_cans"]
-    last_refill = stats["last_refill_date"]
-    avg_h = stats["avg_hourly_consumption"]
-    total_w = stats["total_weekly_consumption"]
-    hours_left = stats["hours_left"]
-    
-    # Get current week usage (Mon-Sun)
     current_week_usage = await inventory_service.get_current_week_usage()
-    
+    avg_h = stats["avg_hourly_consumption"]
+    hours_left = stats["hours_left"]
+
     text = "📦 <b>Склад палива</b>\n"
     text += "➖➖➖➖➖➖➖➖➖➖\n"
-    text += f"🛒 Залишок: <b>{stock_cans:.2f}</b> каністр\n"
-    text += f"💧 Обсяг: {stock_liters} літрів\n\n"
-    
-    if last_refill:
-        text += f"📅 Останнє поповнення: {last_refill.strftime('%d.%m.%Y')}\n"
-    
+    text += f"🛒 Залишок: <b>{stats['stock_cans']:.2f}</b> каністр\n"
+    text += f"💧 Обсяг: {stats['stock_liters']} літрів\n\n"
+
+    if stats["last_refill_date"]:
+        text += f"📅 Останнє поповнення: {stats['last_refill_date'].strftime('%d.%m.%Y')}\n"
+
     if avg_h > 0.001:
         days_left = hours_left / 24.0
         text += f"📉 Тиждень (Пн-Нд): <b>{current_week_usage:.1f}</b> л\n"
-        text += f"📉 Останні 7 днів: <b>{total_w:.1f}</b> л\n"
+        text += f"📉 Останні 7 днів: <b>{stats['total_weekly_consumption']:.1f}</b> л\n"
         text += f"📊 Сер. витрата (доба): <b>{stats['avg_daily_consumption']:.1f}</b> л\n"
         text += f"📊 Сер. витрата: ~<b>{avg_h:.2f}</b> л/год ⏳\n"
         text += f" Вистачить на: ~<b>{hours_left:.1f}</b> год"
@@ -50,8 +45,16 @@ async def check_stock(message: types.Message, inventory_service: InventoryServic
         text += "\n"
     else:
         text += "📉 Витрата: Немає даних (останні 7 днів)\n"
-        
+
     text += "➖➖➖➖➖➖➖➖➖➖"
+    return text
+
+
+@router.message(F.text == "📦 Склад")
+async def check_stock(message: types.Message, inventory_service: InventoryService):
+    from bot.config import config
+    is_admin = message.from_user.id in config.ADMIN_IDS
+    text = await _stock_text(inventory_service)
     await message.answer(text, reply_markup=get_inventory_kb(is_admin), parse_mode="HTML")
 
 @router.callback_query(F.data == "stock_close")
@@ -73,13 +76,13 @@ async def stock_date_selector_callback(callback: types.CallbackQuery, user_repo:
     from datetime import datetime, timedelta
     builder = InlineKeyboardBuilder()
     now = datetime.now()
-    
+
     # 2 rows of 4 buttons
     for i in range(7):
         dt = now - timedelta(days=i)
         label = "Сьогодні" if i == 0 else "Вчора" if i == 1 else dt.strftime("%d.%m")
         builder.add(InlineKeyboardButton(text=label, callback_data=f"stock_set_date_{dt.strftime('%Y-%m-%d')}"))
-    
+
     builder.adjust(4)
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="stock_back_to_main"))
 
@@ -97,16 +100,16 @@ async def stock_history_callback(callback: types.CallbackQuery, inventory_servic
     if callback.from_user.id not in config.ADMIN_IDS:
         await callback.answer("⛔ Тільки для адміністраторів", show_alert=True)
         return
-        
+
     history = await inventory_service.get_consumption_history(limit=10)
-    
+
     if not history:
         await callback.answer("ℹ️ Історія порожня", show_alert=True)
         return
-        
+
     text = "📜 <b>Історія витрат (останні 10)</b>\n"
     text += "➖➖➖➖➖➖➖➖➖➖\n"
-    
+
     for item in history:
         dt = item['date'].strftime('%d.%m %H:%M')
         amount = item['amount']
@@ -114,67 +117,47 @@ async def stock_history_callback(callback: types.CallbackQuery, inventory_servic
         # Try to clean up amount string if it contains "Taken: "
         if "Taken: " in str(amount):
             amount = str(amount).replace("Taken: ", "")
-            
+
         text += f"⛽ <b>{amount}</b>л | {dt}\n"
         text += f"👤 {user}\n"
         text += "------------------\n"
-        
+
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="stock_back_to_main"))
-    
+
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     await callback.answer()
 
 @router.callback_query(F.data == "stock_back_to_main")
-async def stock_back_handler(callback: types.CallbackQuery, inventory_service: InventoryService, user_repo: UserRepository):
-    # Reuse check_stock logic but via edit_text
+async def stock_back_handler(callback: types.CallbackQuery, inventory_service: InventoryService):
     from bot.config import config
     is_admin = callback.from_user.id in config.ADMIN_IDS
-    stats = await inventory_service.get_detailed_stats()
-    
-
-    text = "📦 <b>Склад палива</b>\n"
-    text += "➖➖➖➖➖➖➖➖➖➖\n"
-    text += f"🛒 Залишок: <b>{stats['stock_cans']:.2f}</b> каністр\n"
-    text += f"💧 Обсяг: {stats['stock_liters']} літрів\n\n"
-    
-    if stats["last_refill_date"]:
-        text += f"📅 Останнє поповнення: {stats['last_refill_date'].strftime('%d.%m.%Y')}\n"
-    
-    if stats["avg_hourly_consumption"] > 0.001:
-        hours_left = stats['hours_left']
-        days_left = hours_left / 24.0
-        text += f"📉 Витрачено за 7 днів: <b>{stats['total_weekly_consumption']:.1f}</b> л\n"
-        text += f"📊 Сер. витрата (доба): <b>{stats['avg_daily_consumption']:.1f}</b> л\n"
-        text += f"📊 Сер. витрата: ~<b>{stats['avg_hourly_consumption']:.2f}</b> л/год ⏳\n"
-        text += f" Вистачить на: ~<b>{hours_left:.1f}</b> год"
-        if days_left >= 1.0:
-            text += f" (≈{days_left:.1f} дн.)"
-        text += "\n"
-    else:
-        text += "📉 Витрата: Немає даних (останні 7 днів)\n"
-        
-    text += "➖➖➖➖➖➖➖➖➖➖"
+    text = await _stock_text(inventory_service)
     await callback.message.edit_text(text, reply_markup=get_inventory_kb(is_admin), parse_mode="HTML")
     await callback.answer()
 
 @router.callback_query(F.data.startswith("stock_set_date_"))
-async def stock_process_date_callback(callback: types.CallbackQuery, inventory_service: InventoryService, user_repo: UserRepository):
+async def stock_process_date_callback(callback: types.CallbackQuery, inventory_service: InventoryService):
+    from bot.config import config
+    if callback.from_user.id not in config.ADMIN_IDS:
+        await callback.answer("⛔ Тільки для адміністраторів", show_alert=True)
+        return
+
     date_str = callback.data.replace("stock_set_date_", "")
     from datetime import datetime
     new_date = datetime.strptime(date_str, "%Y-%m-%d")
-    
+
     success = await inventory_service.update_last_refill_date(callback.from_user.id, new_date)
-    
+
     if success:
         await callback.answer(f"✅ Дату змінено на {new_date.strftime('%d.%m')}")
         # Return to main inventory view
-        await stock_back_handler(callback, inventory_service, user_repo)
+        await stock_back_handler(callback, inventory_service)
     else:
         await callback.answer("❌ Помилка: лог поповнення не знайдено", show_alert=True)
 
 @router.callback_query(F.data.in_({"stock_add_1", "stock_add_5", "stock_dec_1"}))
-async def stock_control_callback(callback: types.CallbackQuery, inventory_service: InventoryService, user_repo: UserRepository):
+async def stock_control_callback(callback: types.CallbackQuery, inventory_service: InventoryService):
     from bot.config import config
     if callback.from_user.id not in config.ADMIN_IDS:
         await callback.answer("⛔ Тільки для адміністраторів", show_alert=True)
@@ -185,7 +168,7 @@ async def stock_control_callback(callback: types.CallbackQuery, inventory_servic
     if action == "stock_add_1": amount = 1
     elif action == "stock_add_5": amount = 5
     elif action == "stock_dec_1": amount = -1
-    
+
     if amount > 0:
         await inventory_service.add_cans(callback.from_user.id, amount)
         msg = f"✅ Додано {amount} шт."
@@ -193,141 +176,119 @@ async def stock_control_callback(callback: types.CallbackQuery, inventory_servic
         await inventory_service.take_fuel(callback.from_user.id, abs(amount) * 20)
         msg = f"✅ Вилучено {abs(amount)} шт."
 
-    stats = await inventory_service.get_detailed_stats()
-    
-
-    text = "📦 <b>Склад палива</b>\n"
-    text += "➖➖➖➖➖➖➖➖➖➖\n"
-    text += f"🛒 Залишок: <b>{stats['stock_cans']:.2f}</b> каністр\n"
-    text += f"💧 Обсяг: {stats['stock_liters']} літрів\n\n"
-    
-    if stats["last_refill_date"]:
-        text += f"📅 Останнє поповнення: {stats['last_refill_date'].strftime('%d.%m.%Y')}\n"
-    
-    if stats["avg_hourly_consumption"] > 0.001:
-        hours_left = stats['hours_left']
-        days_left = hours_left / 24.0
-        text += f"📉 Витрачено за 7 днів: <b>{stats['total_weekly_consumption']:.1f}</b> л\n"
-        text += f"📊 Сер. витрата (доба): <b>{stats['avg_daily_consumption']:.1f}</b> л\n"
-        text += f"📊 Сер. витрата: ~<b>{stats['avg_hourly_consumption']:.2f}</b> л/год ⏳\n"
-        text += f" Вистачить на: ~<b>{hours_left:.1f}</b> год"
-        if days_left >= 1.0:
-            text += f" (≈{days_left:.1f} дн.)"
-        text += "\n"
-        
-    text += "➖➖➖➖➖➖➖➖➖➖"
-
+    text = await _stock_text(inventory_service)
     try:
         await callback.message.edit_text(text, reply_markup=get_inventory_kb(is_admin=True), parse_mode="HTML")
-    except Exception:
-        pass
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            raise
     await callback.answer(msg)
 
 @router.message(F.text == "⛽ Заправити")
-async def take_fuel_prompt(message: types.Message):
-    await message.answer("Куди заправляємо?", reply_markup=get_refuel_kb())
+async def take_fuel_prompt(message: types.Message, generator_service: GeneratorService):
+    gens = await generator_service.get_status()
+    if not gens:
+        await message.answer(NO_ACTIVE_GENERATORS)
+        return
+    await message.answer(REFUEL_PROMPT, reply_markup=get_refuel_kb(gens))
 
-@router.callback_query(F.data.startswith("refuel_select_"))
-async def select_gen_step(callback: types.CallbackQuery, state: FSMContext):
-    from bot.keyboards.refuel_kb import get_refuel_accumulator_kb
-    from bot.states import RefuelAccumulatorStates
-    
-    target = callback.data.split("_")[2]  # Extract gen name
-    
+@router.callback_query(GenCb.filter(F.action == "refuel"))
+async def select_gen_step(callback: types.CallbackQuery, callback_data: GenCb, state: FSMContext, generator_service: GeneratorService):
+    gen = await generator_service.get_active(callback_data.id)
+    if not gen:
+        await callback.answer(STALE_MENU_TEXT, show_alert=True)
+        return
+
     # Initialize accumulator mode
     await state.set_state(RefuelAccumulatorStates.accumulating)
-    await state.update_data(gen_name=target, accumulated_liters=0)
-    
+    await state.update_data(gen_id=gen.id, gen_name=gen.name, accumulated_liters=0)
+
     await callback.message.edit_text(
-        f"⛽ <b>{target}</b>\n\nДодайте паливо:\n📊 Всього: 0 л",
-        reply_markup=get_refuel_accumulator_kb(target, 0),
+        f"⛽ <b>{gen.name}</b>\n\nДодайте паливо:\n📊 Всього: 0 л",
+        reply_markup=get_refuel_accumulator_kb(),
         parse_mode="HTML"
     )
     await callback.answer()
 
 @router.callback_query(RefuelAccumulatorStates.accumulating, F.data.startswith("refuel_add_"))
 async def refuel_add_increment(callback: types.CallbackQuery, state: FSMContext):
-    from bot.keyboards.refuel_kb import get_refuel_accumulator_kb
-    
     # Extract increment amount
     increment = int(callback.data.split("_")[2])
-    
+
     # Get current data
     data = await state.get_data()
     gen_name = data.get("gen_name")
     current_total = data.get("accumulated_liters", 0)
-    
+
     # Add increment
     new_total = current_total + increment
     await state.update_data(accumulated_liters=new_total)
-    
+
     # Update message with new total
     await callback.message.edit_text(
         f"⛽ <b>{gen_name}</b>\n\nДодайте паливо:\n📊 Всього: {new_total} л",
-        reply_markup=get_refuel_accumulator_kb(gen_name, new_total),
+        reply_markup=get_refuel_accumulator_kb(),
         parse_mode="HTML"
     )
     await callback.answer(f"+{increment}л")
 
-@router.callback_query(RefuelAccumulatorStates.accumulating, F.data.startswith("refuel_acc_done_"))
+# startswith: buttons sent before the switch to generator ids carry "refuel_acc_done_<name>"
+@router.callback_query(RefuelAccumulatorStates.accumulating, F.data.startswith("refuel_acc_done"))
 async def refuel_accumulator_done(callback: types.CallbackQuery, state: FSMContext, inventory_service: InventoryService, generator_service: GeneratorService):
-    # Get accumulated data
     data = await state.get_data()
-    gen_name = data.get("gen_name")
     total_liters = data.get("accumulated_liters", 0)
-    
-    # Clear FSM state
-    await state.clear()
-    
-    # Validate minimum amount
+
+    # Validate minimum amount (state stays so the user can keep adding)
     if total_liters <= 0:
         await callback.answer("⚠️ Додайте хоча б трохи палива!", show_alert=True)
         return
-    
-    # Call existing refuel logic
+
+    await state.clear()
+
+    gen_id = data.get("gen_id")
+    gen = await generator_service.get_active(gen_id) if gen_id else None
+    if not gen:
+        await callback.answer(STALE_MENU_TEXT, show_alert=True)
+        return
+    gen_name = gen.name
+
     try:
         # 1. Take EXACT liters from stock
         new_amount_liters = await inventory_service.take_fuel(callback.from_user.id, total_liters)
-        new_amount_cans = new_amount_liters / 20.0
-        
         # 2. Add specific liters to Generator
         await generator_service.log_refuel(callback.from_user.id, gen_name, total_liters)
-             
-        # 3. Check Anti-Gel Threshold
-        gen = await generator_service.repo.get_by_name(gen_name)
-        antigel_warning = ""
-        kb_buttons = [
-            [types.InlineKeyboardButton(text="❌ Закрити", callback_data="refuel_close")]
-        ]
-        
-        if gen and gen.fuel_since_antigel >= 80:
-            antigel_warning = f"\n\n⚠️ <b>УВАГА: ПОТРІБНА ПРИСАДКА!</b>\nНакопичено <b>{gen.fuel_since_antigel:.1f}л</b> палива. Будь ласка, додайте Anti-Gel!"
-            kb_buttons.insert(0, [
-                types.InlineKeyboardButton(text="✅ Присадку додано", callback_data=f"antigel_reset_{gen_name}")
-            ])
-             
-        text = "✅ <b>Заправка успішна!</b>\n"
-        text += "➖➖➖➖➖➖➖➖➖➖\n"
-        
-        # Determine current status icon
-        status_icon = "🔴"
-        if gen and gen.status == GenStatus.running: status_icon = "🟢"
-        elif gen and gen.status == GenStatus.standby: status_icon = "🟡"
-        
-        text += f"⛽ {status_icon} <b>{gen_name}</b> +{total_liters}л\n"
-        text += f"📦 Залишок: <b>{new_amount_cans:.2f}</b> каністр"
-        text += antigel_warning
-        
-        await callback.message.edit_text(
-            text, 
-            parse_mode="HTML",
-            reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb_buttons)
-        )
+    except Exception:
+        # Re-raise so DbSessionMiddleware rolls back: never keep stock taken without the generator refuelled
+        logging.exception("Refuel failed: user_id=%s gen=%s liters=%s", callback.from_user.id, gen_name, total_liters)
+        await callback.message.answer("❌ Не вдалося записати заправку, зміни скасовано. Спробуйте ще раз.")
         await callback.answer()
-    except Exception as e:
-        logging.error(f"Refuel error: {e}")
-        await callback.message.answer(f"❌ Помилка: {e}")
-        await callback.answer()
+        raise
+
+    new_amount_cans = new_amount_liters / 20.0
+
+    # 3. Check Anti-Gel Threshold
+    kb_buttons = [
+        [types.InlineKeyboardButton(text="❌ Закрити", callback_data="refuel_close")]
+    ]
+    antigel_warning = ""
+    if gen.fuel_since_antigel >= 80:
+        antigel_warning = f"\n\n⚠️ <b>УВАГА: ПОТРІБНА ПРИСАДКА!</b>\nНакопичено <b>{gen.fuel_since_antigel:.1f}л</b> палива. Будь ласка, додайте Anti-Gel!"
+        kb_buttons.insert(0, [
+            types.InlineKeyboardButton(text="✅ Присадку додано", callback_data=GenCb(action="antigel", id=gen.id).pack())
+        ])
+
+    text = "✅ <b>Заправка успішна!</b>\n"
+    text += "➖➖➖➖➖➖➖➖➖➖\n"
+    text += f"⛽ {status_icon(gen.status)} <b>{gen_name}</b> +{total_liters}л\n"
+    text += f"📦 Залишок: <b>{new_amount_cans:.2f}</b> каністр"
+    text += antigel_warning
+
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb_buttons)
+    )
+    await callback.answer()
 
 @router.callback_query(RefuelAccumulatorStates.accumulating, F.data == "refuel_acc_cancel")
 async def refuel_accumulator_cancel(callback: types.CallbackQuery, state: FSMContext):
@@ -340,62 +301,14 @@ async def process_refuel_close(callback: types.CallbackQuery):
     await callback.message.delete()
     await callback.answer()
 
-@router.callback_query(F.data.startswith("refuel_confirm_"))
-async def process_refuel_confirm(callback: types.CallbackQuery, inventory_service: InventoryService, generator_service: GeneratorService):
-    # Format: refuel_confirm_GEN-1_20
-    parts = callback.data.split("_")
-    gen_name = parts[2]
-    liters = int(parts[3])
-    
-    try:
-        # 1. Take EXACT liters from stock
-        new_amount_liters = await inventory_service.take_fuel(callback.from_user.id, liters)
-        new_amount_cans = new_amount_liters / 20.0
-        
-        # 2. Add specific liters to Generator
-        await generator_service.log_refuel(callback.from_user.id, gen_name, liters)
-             
-        # 3. Check Anti-Gel Threshold
-        gen = await generator_service.repo.get_by_name(gen_name)
-        antigel_warning = ""
-        kb_buttons = [
-            [types.InlineKeyboardButton(text="❌ Закрити", callback_data="refuel_close")]
-        ]
-        
-        if gen and gen.fuel_since_antigel >= 80:
-            antigel_warning = f"\n\n⚠️ <b>УВАГА: ПОТРІБНА ПРИСАДКА!</b>\nНакопичено <b>{gen.fuel_since_antigel:.1f}л</b> палива. Будь ласка, додайте Anti-Gel!"
-            kb_buttons.insert(0, [
-                types.InlineKeyboardButton(text="✅ Присадку додано", callback_data=f"antigel_reset_{gen_name}")
-            ])
-             
-        text = "✅ <b>Заправка успішна!</b>\n"
-        text += "➖➖➖➖➖➖➖➖➖➖\n"
-        
-        # Determine current status icon
-        status_icon = "🔴"
-        if gen and gen.status == GenStatus.running: status_icon = "🟢"
-        elif gen and gen.status == GenStatus.standby: status_icon = "🟡"
-        
-        text += f"⛽ {status_icon} <b>{gen_name}</b> +{liters}л\n"
-        text += f"📦 Залишок: <b>{new_amount_cans:.2f}</b> каністр"
-        text += antigel_warning
-        
-        await callback.message.edit_text(
-            text, 
-            parse_mode="HTML",
-            reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb_buttons)
-        )
-        await callback.answer()
-    except Exception as e:
-        logging.error(f"Refuel error: {e}")
-        await callback.message.answer(f"❌ Помилка: {e}")
-        await callback.answer()
+@router.callback_query(GenCb.filter(F.action == "antigel"))
+async def process_antigel_reset(callback: types.CallbackQuery, callback_data: GenCb, generator_service: GeneratorService):
+    gen = await generator_service.get_by_id(callback_data.id)
+    if not gen:
+        await callback.answer(STALE_MENU_TEXT, show_alert=True)
+        return
+    await generator_service.reset_antigel(callback.from_user.id, gen.name)
 
-@router.callback_query(F.data.startswith("antigel_reset_"))
-async def process_antigel_reset(callback: types.CallbackQuery, generator_service: GeneratorService):
-    gen_name = callback.data.replace("antigel_reset_", "")
-    await generator_service.reset_antigel(callback.from_user.id, gen_name)
-    
     # Update message to remove warning
     text = callback.message.text
     if "⚠️ УВАГА: ПОТРІБНА ПРИСАДКА!" in text:
@@ -405,9 +318,9 @@ async def process_antigel_reset(callback: types.CallbackQuery, generator_service
         # Remove empty lines at the end
         while new_lines and not new_lines[-1].strip():
             new_lines.pop()
-        
+
         new_text = "\n".join(new_lines) + "\n\n✅ <b>Присадку додано!</b>"
-        
+
         await callback.message.edit_text(
             new_text,
             parse_mode="HTML",
@@ -415,10 +328,13 @@ async def process_antigel_reset(callback: types.CallbackQuery, generator_service
                 types.InlineKeyboardButton(text="❌ Закрити", callback_data="refuel_close")
             ]])
         )
-    
+
     await callback.answer("Дані оновлено!")
 
 
 @router.callback_query(F.data == "fuel_back")
-async def back_to_gen_select(callback: types.CallbackQuery):
-    await callback.message.edit_text("Куди заправляємо?", reply_markup=get_refuel_kb())
+async def back_to_gen_select(callback: types.CallbackQuery, state: FSMContext, generator_service: GeneratorService):
+    await state.clear()
+    gens = await generator_service.get_status()
+    await callback.message.edit_text(REFUEL_PROMPT, reply_markup=get_refuel_kb(gens))
+    await callback.answer()

@@ -35,11 +35,6 @@ class UserRepository(BaseRepository[User]):
 
         return user
     
-    async def get_admins(self) -> list[User]:
-        stmt = select(User).where(User.role == UserRole.admin)
-        result = await self.session.execute(stmt)
-        return list(result.scalars().all())
-
     async def get_all(self, include_blocked: bool = False) -> list[User]:
         stmt = select(User)
         if not include_blocked:

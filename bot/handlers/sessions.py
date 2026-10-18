@@ -14,11 +14,10 @@ from bot.services.inventory import InventoryService
 from bot.database.repositories.generator import GeneratorRepository
 from bot.database.repositories.logs import LogRepository
 from bot.database.models import SessionStatus
+from bot.keyboards.inline_kb import STALE_MENU_TEXT, GenCb, status_icon
 from bot.keyboards.session_kb import (
     get_in_progress_kb, 
-    get_gen_choice_kb,
     get_gen_selection_kb,
-    get_skip_kb
 )
 
 router = Router()
@@ -56,31 +55,30 @@ async def complete_session_start(callback: CallbackQuery, state: FSMContext, gen
     session_id = int(callback.data.split(":")[1])
     await state.update_data(session_id=session_id, selected_gens=[])
     
-    statuses = await _get_gen_statuses(generator_service)
+    gens = await generator_service.get_status()
     
     await callback.message.edit_text(
         "⚡️ <b>Завершення сесії</b>\n\n"
         "Оберіть генератори які були заправлені:",
-        reply_markup=get_gen_selection_kb([], statuses=statuses),
+        reply_markup=get_gen_selection_kb(gens, []),
         parse_mode="HTML"
     )
     await state.set_state(SessionStates.selecting_generators)
     await callback.answer()
 
-async def _get_gen_statuses(generator_service: GeneratorService) -> dict:
+async def _get_gen_statuses(generator_service: GeneratorService) -> dict[str, str]:
+    """{generator name: status emoji} for active generators."""
     gens = await generator_service.get_status()
-    from bot.database.models import GenStatus
-    status_map = {}
-    for g in gens:
-        icon = "🔴"
-        if g.status == GenStatus.running: icon = "🟢"
-        elif g.status == GenStatus.standby: icon = "🟡"
-        status_map[g.name] = icon
-    return status_map
+    return {g.name: status_icon(g.status) for g in gens}
 
-@router.callback_query(SessionStates.selecting_generators, F.data.startswith("toggle_gen:"))
-async def toggle_generator(callback: CallbackQuery, state: FSMContext, generator_service: GeneratorService):
-    gen_name = callback.data.split(":")[1]
+@router.callback_query(SessionStates.selecting_generators, GenCb.filter(F.action == "toggle"))
+async def toggle_generator(callback: CallbackQuery, callback_data: GenCb, state: FSMContext, generator_service: GeneratorService):
+    gen = await generator_service.get_active(callback_data.id)
+    if not gen:
+        await callback.answer(STALE_MENU_TEXT, show_alert=True)
+        return
+    # FSM keeps generator names: finish_session works with names
+    gen_name = gen.name
     data = await state.get_data()
     selected = data.get("selected_gens", [])
     
@@ -92,11 +90,11 @@ async def toggle_generator(callback: CallbackQuery, state: FSMContext, generator
     
     await state.update_data(selected_gens=selected)
     
-    statuses = await _get_gen_statuses(generator_service)
+    gens = await generator_service.get_status()
     
     # Update keyboard
     await callback.message.edit_reply_markup(
-        reply_markup=get_gen_selection_kb(selected, statuses=statuses)
+        reply_markup=get_gen_selection_kb(gens, selected)
     )
     await callback.answer()
 
@@ -129,25 +127,12 @@ async def confirm_generators(callback: CallbackQuery, state: FSMContext, generat
     await state.set_state(SessionStates.waiting_for_liters)
     await callback.answer()
 
-@router.callback_query(SessionStates.waiting_for_generator, F.data.startswith("gen_choice:"))
-async def generator_chosen(callback: CallbackQuery, state: FSMContext):
-    choice = callback.data.split(":")[1]
-    await state.update_data(gen_name=choice)
-    
-    await callback.message.edit_text("⛽️ <b>Скільки літрів палива залили?</b>\n\n"
-                                     "Введіть число (наприклад: 20.5).", 
-                                     reply_markup=None,
-                                     parse_mode="HTML")
-    await state.set_state(SessionStates.waiting_for_liters)
-    await callback.answer()
-
 @router.message(SessionStates.waiting_for_liters)
 async def liters_input(message: Message, state: FSMContext, generator_service: GeneratorService):
     try:
         liters = float(message.text.strip().replace(",", "."))
         data = await state.get_data()
         
-        # Check if we're using multi-generator flow
         if "selected_gens" in data and "gen_fuel_data" in data:
             # Multi-generator flow
             selected_gens = data["selected_gens"]
@@ -190,15 +175,9 @@ async def liters_input(message: Message, state: FSMContext, generator_service: G
                 )
                 await state.set_state(SessionStates.waiting_for_antigel)
         else:
-            # Old single-generator flow (fallback)
-            await state.update_data(liters=liters)
-            await message.answer(
-                "📝 <b>Додати нотатки?</b>\n(наприклад: 'залив масло', 'були проблеми')\n\n"
-                "Натисніть 'Пропустити', якщо немає.", 
-                reply_markup=get_skip_kb(),
-                parse_mode="HTML"
-            )
-            await state.set_state(SessionStates.waiting_for_notes)
+            # Data from the removed single-generator flow: nothing to continue
+            await state.clear()
+            await message.answer(STALE_MENU_TEXT)
         
     except ValueError:
         await message.answer("⚠️ Будь ласка, введіть коректне число (наприклад 10.5).")

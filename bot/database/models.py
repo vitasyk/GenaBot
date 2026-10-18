@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from sqlalchemy import BigInteger, String, DateTime, ForeignKey, Integer, Float, Date, JSON
+from sqlalchemy import BigInteger, Boolean, String, Text, DateTime, ForeignKey, Integer, Float, Date, JSON, true
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.ext.asyncio import AsyncAttrs
 
@@ -60,6 +60,8 @@ class Generator(Base):
     last_maintenance: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     fuel_since_antigel: Mapped[float] = mapped_column(Float, default=0.0)
     last_stop_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
+    instructions: Mapped[str | None] = mapped_column(Text, nullable=True)  # SOS start-up text (Telegram HTML)
 
 class LogEvent(Base):
     __tablename__ = "logs"
