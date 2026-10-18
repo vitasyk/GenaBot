@@ -2,6 +2,7 @@ from aiogram import Router, F, types, Bot
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
+import asyncio
 import html
 import logging
 
@@ -71,7 +72,8 @@ async def admin_sessions_list(callback: types.CallbackQuery, bot: Bot):
                 'pending': "⏳",
                 'in_progress': "⚙️",
                 'completed': "✅",
-                'cancelled': "❌"
+                'cancelled': "❌",
+                'expired': "⌛"
             }
             icon = status_map.get(s.status, "❓")
             
@@ -164,10 +166,10 @@ async def _admin_session_view_logic(callback: types.CallbackQuery, bot: Bot, ses
             text += f"⛽ <b>Залито:</b> {s.liters} л\n"
             text += f"📦 <b>Списано:</b> {s.cans} кан\n"
             if s.notes:
-                text += f"📝 <b>Замітка:</b> {s.notes}\n"
+                text += f"📝 <b>Замітка:</b> {html.escape(s.notes)}\n"
 
         builder = InlineKeyboardBuilder()
-        if s.status in ['pending', 'in_progress']:
+        if s.status in ['pending', 'in_progress', 'expired']:
             builder.row(InlineKeyboardButton(text="❌ Скасувати сесію", callback_data=f"admin_session_cancel:{s.id}"))
         
         builder.row(InlineKeyboardButton(text="🔙 До списку", callback_data="admin_sessions"))
@@ -260,9 +262,9 @@ async def admin_sheets_workers_list(callback: types.CallbackQuery, user_repo: Us
     from bot.services.google_sheets import GoogleSheetsService
     sheets_service = GoogleSheetsService()
     
-    # 1. Get all names from Sheets (Rows 39-60)
+    # 1. Get all names from Sheets (gspread is blocking: keep it off the event loop)
     try:
-        sheet_names = sheets_service.get_all_worker_names()
+        sheet_names = await asyncio.to_thread(sheets_service.get_all_worker_names)
     except Exception as e:
         await callback.answer(f"❌ Помилка Google Sheets: {str(e)}", show_alert=True)
         return
@@ -319,7 +321,7 @@ async def admin_next_workers_handler(callback: types.CallbackQuery, bot: Bot):
         user_repo = UserRepository(session)
         
         # 1. Get schedule entries for today and tomorrow
-        entries = await sched_repo.get_all_for_date_range(now.date(), now.date() + timedelta(days=1))
+        entries = await sched_repo.get_all_for_date_range(now.date(), now.date() + timedelta(days=1), config.QUEUE_NUMBER)
         
         if not entries:
             await callback.message.edit_text(
@@ -365,7 +367,7 @@ async def admin_next_workers_handler(callback: types.CallbackQuery, bot: Bot):
 
         # 3. Get workers for that time from Sheets
         lookup_dt = next_rt - timedelta(minutes=1)
-        worker_tuples = sheets_service.get_workers_for_outage(lookup_dt.hour, lookup_dt.date())
+        worker_tuples = await asyncio.to_thread(sheets_service.get_workers_for_outage, lookup_dt.hour, lookup_dt.date())
         
         text = f"👷 <b>Наступна заправка</b>\n"
         text += f"⏰ Час відновлення: <code>{next_rt.strftime('%H:%M')}</code> ({next_rt.strftime('%d.%m')})\n\n"

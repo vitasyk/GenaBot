@@ -1,3 +1,6 @@
+import html
+import logging
+
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
@@ -6,12 +9,11 @@ from aiogram import Bot
 
 from bot.states import SessionStates
 from bot.database.main import session_maker
-from bot.database.repositories.session import SessionRepository
+from bot.database.repositories.session import OPEN_STATUSES, SessionRepository
 from bot.database.repositories.user import UserRepository
 from bot.services.notifier import NotifierService
 from bot.services.generator import GeneratorService
 from bot.services.inventory import InventoryService
-from bot.database.repositories.generator import GeneratorRepository
 from bot.database.repositories.logs import LogRepository
 from bot.database.models import SessionStatus
 from bot.keyboards.session_kb import (
@@ -29,22 +31,17 @@ async def start_session_handler(callback: CallbackQuery):
     
     async with session_maker() as session:
         repo = SessionRepository(session)
-        # Update status
-        updated_session = await repo.update_status(session_id, SessionStatus.in_progress)
-        
+        # Never reopens a completed/cancelled session from an old button
+        updated_session = await repo.update_status(session_id, SessionStatus.in_progress, only_from=OPEN_STATUSES)
+
         if not updated_session:
-            await callback.answer("Сесія не знайдена або вже завершена.", show_alert=True)
+            await callback.answer("Сесію вже завершено або скасовано.", show_alert=True)
             return
 
-        # Update message
-        workers = []
-        if updated_session.worker1_id: workers.append(f"Worker {updated_session.worker1_id}") # Ideally fetch names
-        # Just keep it simple for now or fetch names if available in model (relationships not loaded)
-        
         deadline_str = updated_session.deadline.strftime("%H:%M")
-        
+
         msg_text = (f"⚙️ <b>Сесія в процесі</b>\n\n"
-                    f"Розпочав: {callback.from_user.full_name}\n"
+                    f"Розпочав: {html.escape(callback.from_user.full_name)}\n"
                     f"Дедлайн (світло): {deadline_str}\n\n"
                     f"Натисніть 'Завершити', коли заправите генератор.")
         
@@ -228,152 +225,71 @@ async def process_notes(message: Message, state: FSMContext, bot: Bot, generator
     await finish_session(message, state, bot, notes=message.text, generator_service=generator_service, inventory_service=inventory_service)
 
 async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot: Bot, notes: str | None, generator_service: GeneratorService = None, inventory_service: InventoryService = None):
-    # Note: GeneratorService might need to be passed or fetched if not available via DI in this async def context
-    # Usually it should be passed from the handlers that call finish_session
-    
     data = await state.get_data()
-    antigel_added = data.get("antigel_added", False)
-    
+    # Clear first: if the reply fails, the worker must not stay on this step and complete again
+    await state.clear()
     if isinstance(event, CallbackQuery):
         await event.answer()
-        
+    reply = event.message.edit_text if isinstance(event, CallbackQuery) else event.answer
+
     session_id = data.get("session_id")
+    gen_fuel_data = data.get("gen_fuel_data") or {}
+    if session_id is None or not gen_fuel_data:
+        await reply("⚠️ Дані сесії втрачено. Натисніть «✅ Завершити сесію» ще раз.")
+        return
+
     user_id = event.from_user.id
-    
-    # Check if multi-generator flow
-    if "gen_fuel_data" in data:
-        # Multi-generator flow
-        gen_fuel_data = data.get("gen_fuel_data", {})
-        total_liters = sum(gen_fuel_data.values())
-        total_cans = total_liters / 20.0
-        
-        # Format as "GEN-1 (003): 15л, GEN-2 (036) WILSON: 10л"
-        gen_summary = ", ".join([f"{name}: {liters}л" for name, liters in gen_fuel_data.items()])
-        
-        async with session_maker() as session:
-            repo = SessionRepository(session)
-            
-            # Deduct fuel from inventory stock
-            if inventory_service:
-                try:
-                    new_stock_liters = await inventory_service.take_fuel(user_id, total_liters)
-                    new_stock_cans = new_stock_liters / 20.0
-                except Exception as e:
-                    import logging
-                    logging.error(f"Failed to deduct fuel from inventory: {e}")
-                    new_stock_cans = None
-            else:
-                new_stock_cans = None
-            
-            completed_session = await repo.complete_session(
-                session_id=session_id,
-                completed_by=user_id,
-                gen_name=gen_summary,
-                liters=total_liters,
-                cans=total_cans,
-                notes=notes
-            )
-            
-            # Update individual generator fuel levels and log refueling
-            if generator_service:
-                for name, liters in gen_fuel_data.items():
-                    try:
-                        await generator_service.log_refuel(user_id, name, liters)
-                    except Exception as ge:
-                        import logging
-                        logging.error(f"Failed to log refuel for {name}: {ge}")
-            
-            # Confirmation with breakdown
-            statuses = await _get_gen_statuses(generator_service)
-            gen_list = "\n".join([f"  • {statuses.get(name, '🔴')} {name}: {liters}л" for name, liters in gen_fuel_data.items()])
-            antigel_text = "✅ Так" if antigel_added else "❌ Ні"
-            
-            msg = (
-                f"✅ <b>Сесію #{session_id} завершено!</b>\n\n"
-                f"👤 Воркер: {event.from_user.full_name}\n"
-                f"⚡️ Генератори:\n{gen_list}\n"
-                f"⛽️ Всього: {total_liters}л ({total_cans:.1f} кан)\n"
-                f"💉 Антигель: {antigel_text}\n"
-                f"🕒 Час: {completed_session.end_time.strftime('%H:%M')}"
-            )
-            
-            # Add stock info if available
-            if new_stock_cans is not None:
-                msg += f"\n📦 Залишок на складі: {new_stock_cans:.2f} кан"
-            
-            if notes:
-                msg += f"\n📝 Нотатки: {notes}"
+    antigel_added = data.get("antigel_added", False)
+    total_liters = sum(gen_fuel_data.values())
+    total_cans = total_liters / 20.0
+    gen_summary = ", ".join(f"{name}: {liters}л" for name, liters in gen_fuel_data.items())
 
-            # Reset antigel if added
-            if antigel_added:
-                async with session_maker() as session:
-                    gen_repo = GeneratorRepository(session)
-                    # We can use gen_repo directly here to reset
-                    for gen_name in gen_fuel_data.keys():
-                        await gen_repo.reset_antigel_counter(gen_name)
-                    await session.commit()
+    # Complete first: only the worker who actually closes the session deducts fuel
+    async with session_maker() as session:
+        completed_session = await SessionRepository(session).complete_session(
+            session_id=session_id,
+            completed_by=user_id,
+            gen_name=gen_summary,
+            liters=total_liters,
+            cans=total_cans,
+            notes=notes
+        )
+    if not completed_session:
+        await reply("ℹ️ Цю сесію вже завершено. Паливо повторно не списано.")
+        return
 
-            # Notify Admins with summary
-            notifier = NotifierService(bot)
-            await notifier.notify_admins(f"📦 <b>Звіт про заправку (Сесія #{session_id})</b>\n\n{msg}")
+    new_stock_cans = None
+    if inventory_service:
+        try:
+            new_stock_cans = await inventory_service.take_fuel(user_id, total_liters) / 20.0
+        except Exception:
+            logging.exception(f"Failed to deduct fuel for session {session_id}, user_id={user_id}")
 
-            if isinstance(event, CallbackQuery):
-                await event.message.edit_text(msg, parse_mode="HTML")
-            else:
-                await event.answer(msg, parse_mode="HTML")
-    else:
-        # Old single-generator flow (fallback)
-        gen_choice = data.get("gen_name")
-        liters = data.get("liters")
-        cans = liters / 20.0
-        
-        async with session_maker() as session:
-            repo = SessionRepository(session)
-            
-            # Deduct fuel from inventory stock
-            if inventory_service:
-                try:
-                    new_stock_liters = await inventory_service.take_fuel(user_id, liters)
-                    new_stock_cans = new_stock_liters / 20.0
-                except Exception as e:
-                    import logging
-                    logging.error(f"Failed to deduct fuel from inventory: {e}")
-                    new_stock_cans = None
-            else:
-                new_stock_cans = None
-            
-            completed_session = await repo.complete_session(
-                session_id=session_id,
-                completed_by=user_id,
-                gen_name=gen_choice,
-                liters=liters,
-                cans=cans,
-                notes=notes
-            )
-            
-            # Update generator fuel level and log refueling (single gen flow)
-            if generator_service and gen_choice:
-                try:
-                    await generator_service.log_refuel(user_id, gen_choice, liters)
-                except Exception as ge:
-                    import logging
-                    logging.error(f"Failed to log refuel for {gen_choice}: {ge}")
-            
-            msg = (
-                f"✅ <b>Сесію # {session_id} завершено!</b>\n\n"
-                f"👤 Воркер: {event.from_user.full_name}\n"
-                f"⚡️ Генератор: {gen_choice}\n"
-                f"⛽️ Паливо: {liters}л ({cans:.1f} кан)\n"
-                f"🕒 Час: {completed_session.end_time.strftime('%H:%M')}"
-            )
-            
-            # Add stock info if available
-            if new_stock_cans is not None:
-                msg += f"\n📦 Залишок на складі: {new_stock_cans:.2f} кан"
-            
-            if isinstance(event, CallbackQuery):
-                await event.message.edit_text(msg, parse_mode="HTML")
-            else:
-                await event.answer(msg, parse_mode="HTML")
-            
-    await state.clear()
+    if generator_service:
+        for name, liters in gen_fuel_data.items():
+            try:
+                await generator_service.log_refuel(user_id, name, liters)
+                if antigel_added:
+                    await generator_service.reset_antigel(user_id, name)
+            except Exception:
+                logging.exception(f"Failed to log refuel for {name}, session {session_id}")
+
+    statuses = await _get_gen_statuses(generator_service)
+    gen_list = "\n".join(
+        f"  • {statuses.get(name, '🔴')} {html.escape(name)}: {liters}л" for name, liters in gen_fuel_data.items()
+    )
+    msg = (
+        f"✅ <b>Сесію #{session_id} завершено!</b>\n\n"
+        f"👤 Воркер: {html.escape(event.from_user.full_name)}\n"
+        f"⚡️ Генератори:\n{gen_list}\n"
+        f"⛽️ Всього: {total_liters}л ({total_cans:.1f} кан)\n"
+        f"💉 Антигель: {'✅ Так' if antigel_added else '❌ Ні'}\n"
+        f"🕒 Час: {completed_session.end_time.strftime('%H:%M')}"
+    )
+    if new_stock_cans is not None:
+        msg += f"\n📦 Залишок на складі: {new_stock_cans:.2f} кан"
+    if notes:
+        msg += f"\n📝 Нотатки: {html.escape(notes)}"
+
+    await NotifierService(bot).notify_admins(f"📦 <b>Звіт про заправку (Сесія #{session_id})</b>\n\n{msg}")
+    await reply(msg, parse_mode="HTML")

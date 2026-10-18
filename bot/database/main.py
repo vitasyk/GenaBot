@@ -9,7 +9,3 @@ engine = create_async_engine(
 )
 
 session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-
-async def get_session() -> AsyncSession:
-    async with session_maker() as session:
-        yield session

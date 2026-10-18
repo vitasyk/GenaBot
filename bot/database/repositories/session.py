@@ -1,9 +1,13 @@
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import select, update, delete, and_
+from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import RefuelSession, SessionStatus
+from bot.utils.clock import now_local
+
+# A session can still be started/completed in these statuses (expired = deadline passed, not done yet)
+OPEN_STATUSES = [SessionStatus.pending, SessionStatus.in_progress, SessionStatus.expired]
 
 class SessionRepository:
     def __init__(self, session: AsyncSession):
@@ -42,48 +46,50 @@ class SessionRepository:
     async def get_session_by_id(self, session_id: int) -> Optional[RefuelSession]:
         return await self.session.get(RefuelSession, session_id)
         
-    async def exists_by_deadline(self, deadline: datetime) -> bool:
-        """Check if a session with this exact deadline already exists"""
-        stmt = select(RefuelSession).where(RefuelSession.deadline == deadline)
-        result = await self.session.execute(stmt)
-        return result.scalars().first() is not None
-
     async def exists_by_start_time(self, start_time: datetime) -> bool:
         """Check if a session with this exact start_time already exists"""
         stmt = select(RefuelSession).where(RefuelSession.start_time == start_time)
         result = await self.session.execute(stmt)
         return result.scalars().first() is not None
         
-    async def update_status(self, session_id: int, status: SessionStatus) -> Optional[RefuelSession]:
+    async def update_status(self, session_id: int, status: SessionStatus,
+                            only_from: Optional[List[SessionStatus]] = None) -> Optional[RefuelSession]:
+        """Sets status. With only_from, changes the session only if its current status is in that
+        list and returns None otherwise (another worker already started/finished it)."""
         stmt = update(RefuelSession).where(RefuelSession.id == session_id).values(status=status)
-        await self.session.execute(stmt)
+        if only_from is not None:
+            stmt = stmt.where(RefuelSession.status.in_(only_from))
+        result = await self.session.execute(stmt)
         await self.session.commit()
+        if result.rowcount == 0:
+            return None
         return await self.get_session_by_id(session_id)
-        
-    async def complete_session(self, 
-                               session_id: int, 
-                               completed_by: int,
-                               gen_name: str, 
-                               liters: float, 
-                               cans: float, 
-                               notes: str = None) -> Optional[RefuelSession]:
-        
-        from bot.config import config
-        import zoneinfo
-        tz = zoneinfo.ZoneInfo(config.TIMEZONE)
-        end_time_local = datetime.now(tz).replace(tzinfo=None)
 
-        stmt = update(RefuelSession).where(RefuelSession.id == session_id).values(
+    async def complete_session(self,
+                               session_id: int,
+                               completed_by: int,
+                               gen_name: str,
+                               liters: float,
+                               cans: float,
+                               notes: str = None) -> Optional[RefuelSession]:
+        """Completes an open session. Returns None if it was already completed or cancelled,
+        so a second worker can't record (and deduct) the same refuel twice."""
+        stmt = update(RefuelSession).where(
+            RefuelSession.id == session_id,
+            RefuelSession.status.in_(OPEN_STATUSES),
+        ).values(
             status=SessionStatus.completed,
-            end_time=end_time_local,
+            end_time=now_local(),
             completed_by=completed_by,
             gen_name=gen_name,
             liters=liters,
             cans=cans,
             notes=notes
         )
-        await self.session.execute(stmt)
+        result = await self.session.execute(stmt)
         await self.session.commit()
+        if result.rowcount == 0:
+            return None
         return await self.get_session_by_id(session_id)
         
     async def get_history(self, limit: int = 10) -> List[RefuelSession]:

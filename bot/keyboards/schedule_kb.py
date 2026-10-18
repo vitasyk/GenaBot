@@ -28,13 +28,23 @@ def get_schedule_menu_kb(is_admin: bool = False) -> ReplyKeyboardMarkup:
     # Admin-only buttons
     if is_admin:
         keyboard.append([KeyboardButton(text="✏️ Ввести вручну"), KeyboardButton(text="📸 Розпізнати з фото")])
-        keyboard.append([KeyboardButton(text="🗑️ Очистити графік")])
+        keyboard.append([KeyboardButton(text="🗑️ Очистити графік"), KeyboardButton(text="🔢 Черга")])
     
     # Public buttons (available to all)
     keyboard.append([KeyboardButton(text="📋 Переглянути графік"), KeyboardButton(text="🌐 Завантажити з HOE")])
     keyboard.append([KeyboardButton(text="🔙 Головне меню")])
     
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
+def get_queue_kb(queues: list[str], current: str) -> InlineKeyboardMarkup:
+    """Queue choice, 4 per row, current one marked"""
+    buttons = [
+        InlineKeyboardButton(text=f"✅ {q}" if q == current else q, callback_data=f"queue_set:{q}")
+        for q in queues
+    ]
+    rows = [buttons[i:i + 4] for i in range(0, len(buttons), 4)]
+    rows.append([InlineKeyboardButton(text="✍️ Ввести іншу", callback_data="queue_custom")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def get_date_quick_kb() -> ReplyKeyboardMarkup:
     """Quick date selection"""

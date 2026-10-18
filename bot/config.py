@@ -36,8 +36,12 @@ class Settings(BaseSettings):
     
     # Energy Schedule Parser
     HOE_SCHEDULE_URL: str = "https://hoe.com.ua/page/pogodinni-vidkljuchennja"
-    QUEUE_NUMBER: str = "1.1"  # Which queue to monitor
-    
+    QUEUE_NUMBER: str = "1.1"  # Which queue to monitor; admins change it in "📉 Графік"
+
+    # Schedule image recognition (Claude)
+    ANTHROPIC_API_KEY: SecretStr | None = None
+    SCHEDULE_AI_MODEL: str = "claude-haiku-5-5"
+
     # Slack
     SLACK_WEBHOOK_URL: SecretStr | None = None
     FUEL_THRESHOLD_CANS: float = 2.0

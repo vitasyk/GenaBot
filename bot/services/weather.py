@@ -98,25 +98,6 @@ class WeatherService:
         except Exception:
             return []
 
-    async def check_cold_weather_alert(self) -> str | None:
-        """
-        Analyzes forecast and returns warning message if cold weather is expected.
-        Criteria: < -10°C
-        """
-        forecasts = await self.get_weekly_forecast()
-        min_temp = 100
-        coldest_day = ""
-        
-        for f in forecasts:
-            if f["temp_min"] < min_temp:
-                min_temp = f["temp_min"]
-                coldest_day = f["date"]
-        
-        if min_temp < -10:
-            return f"❄️ <b>Cold Warning!</b>\nTemp will drop to <b>{min_temp:.1f}°C</b> on {coldest_day}.\nCheck fuel and Anti-Gel!"
-        
-        return None
-
     def get_consumption_factor(self, temp: float) -> float:
         """Returns multiplier for fuel consumption based on temperature."""
         if temp < -10:
