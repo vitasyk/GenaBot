@@ -34,15 +34,15 @@ class SessionRepository:
         await self.session.refresh(new_session)
         return new_session
         
-    async def get_active_session(self) -> Optional[RefuelSession]:
-        """Get current session (pending or in_progress)"""
+    async def get_overdue_sessions(self, now: datetime) -> List[RefuelSession]:
+        """Pending/in-progress sessions whose deadline has passed (all of them, not only the latest)."""
         stmt = select(RefuelSession).where(
-            RefuelSession.status.in_([SessionStatus.pending, SessionStatus.in_progress])
-        ).order_by(RefuelSession.start_time.desc()).limit(1)
-        
+            RefuelSession.status.in_([SessionStatus.pending, SessionStatus.in_progress]),
+            RefuelSession.deadline <= now,
+        )
         result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
-        
+        return list(result.scalars().all())
+
     async def get_session_by_id(self, session_id: int) -> Optional[RefuelSession]:
         return await self.session.get(RefuelSession, session_id)
         

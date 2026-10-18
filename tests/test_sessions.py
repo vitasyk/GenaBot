@@ -84,7 +84,7 @@ async def test_note_with_html_is_escaped_and_state_cleared_first():
 def service() -> SessionService:
     service = SessionService(AsyncMock(), bot=AsyncMock())
     service.repo = MagicMock()
-    service.repo.get_active_session = AsyncMock(return_value=None)
+    service.repo.get_overdue_sessions = AsyncMock(return_value=[])
     service.repo.exists_by_start_time = AsyncMock(return_value=False)
     service.repo.update_status = AsyncMock()
     service.repo.create_session = AsyncMock(side_effect=lambda **kw: SimpleNamespace(
@@ -120,7 +120,7 @@ async def test_overdue_session_reminds_once_and_expires(service):
     overdue = SimpleNamespace(id=3, status=SessionStatus.in_progress.value,
                               deadline=datetime.combine(TODAY, time(12)),
                               worker1_id=555, worker2_id=None, worker3_id=None, additional_workers=[])
-    service.repo.get_active_session = AsyncMock(return_value=overdue)
+    service.repo.get_overdue_sessions = AsyncMock(return_value=[overdue])
     service.get_outage_timeline_from_db = AsyncMock(return_value=[])
 
     with at(12, 1):

@@ -102,22 +102,19 @@ class SessionService:
 
     async def _expire_overdue_session(self, now: datetime) -> None:
         """Reminds once when an open session passes its deadline. The session moves to 'expired'
-        (no longer active, so no repeat), and workers can still complete it."""
-        active_session = await self.repo.get_active_session()
-        if not active_session or now < active_session.deadline:
-            return
-
-        await self.repo.update_status(active_session.id, SessionStatus.expired)
-        if not self.notifier:
-            return
-        deadline_str = active_session.deadline.strftime('%H:%M')
-        msg = (f"🔔 <b>Час спливає!</b> Сесія {active_session.id} досягла дедлайну о {deadline_str}. "
-               f"Будь ласка, завершіть заправку.")
-        for worker_id in get_all_workers_for_session(active_session):
-            await self.notifier.notify_user(worker_id, msg)
-        await self.notifier.notify_admins(
-            f"📢 <b>Дедлайн сесії!</b> Сесія {active_session.id} не завершена до {deadline_str}."
-        )
+        (no longer pending, so no repeat), and workers can still complete it."""
+        for overdue in await self.repo.get_overdue_sessions(now):
+            await self.repo.update_status(overdue.id, SessionStatus.expired)
+            if not self.notifier:
+                continue
+            deadline_str = overdue.deadline.strftime('%H:%M')
+            msg = (f"🔔 <b>Час спливає!</b> Сесія {overdue.id} досягла дедлайну о {deadline_str}. "
+                   f"Будь ласка, завершіть заправку.")
+            for worker_id in get_all_workers_for_session(overdue):
+                await self.notifier.notify_user(worker_id, msg)
+            await self.notifier.notify_admins(
+                f"📢 <b>Дедлайн сесії!</b> Сесія {overdue.id} не завершена до {deadline_str}."
+            )
 
     async def _create_outage_session(self, block_start: datetime, deadline: datetime) -> RefuelSession:
         """Internal helper to create session and notify workers/admins"""
