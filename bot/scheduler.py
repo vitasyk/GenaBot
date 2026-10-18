@@ -30,6 +30,7 @@ RUNTIME_SETTING_KEYS = {
     "RESTRICT_ACCESS": "config:restrict_access",
     "NOTIFY_WORKERS": "config:notify_workers",
     "FUEL_THRESHOLD_CANS": "config:fuel_threshold_cans",
+    "QUEUE_NUMBER": "config:queue_number",
 }
 
 async def check_rotation_needed(bot: Bot):
@@ -194,7 +195,7 @@ def start_scheduler(bot: Bot):
     scheduler.start()
 
 
-async def save_runtime_setting(redis: Redis, name: str, value: bool | float) -> None:
+async def save_runtime_setting(redis: Redis, name: str, value: bool | float | str) -> None:
     """Persist an admin-changed config value so it survives a restart."""
     await redis.set(RUNTIME_SETTING_KEYS[name], json.dumps(value))
 

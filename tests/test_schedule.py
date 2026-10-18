@@ -10,6 +10,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.config import config
 from bot.handlers import schedule
+from bot.scheduler import restore_runtime_settings
 from bot.services.schedule_recognizer import RecognizedSchedule, ScheduleRecognitionError, ScheduleRecognizer
 from bot.states import ScheduleStates
 from bot.utils import clock
@@ -72,10 +73,9 @@ async def test_queue_input_is_validated_and_saved(fake_redis, monkeypatch):
 
     await schedule.queue_input(message("4,2"), state)
     assert config.QUEUE_NUMBER == "4.2"
-    assert await fake_redis.get(schedule.QUEUE_KEY) == b"4.2"
 
-    monkeypatch.setattr(config, "QUEUE_NUMBER", "1.1")
-    await schedule.restore_queue(fake_redis)
+    monkeypatch.setattr(config, "QUEUE_NUMBER", "1.1")  # restart: .env default, then Redis wins
+    await restore_runtime_settings(fake_redis)
     assert config.QUEUE_NUMBER == "4.2"
 
 

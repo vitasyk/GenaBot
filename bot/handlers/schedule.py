@@ -23,6 +23,7 @@ from bot.keyboards.main_kb import get_main_keyboard
 from bot.config import config
 from bot.database.repositories.schedule import ScheduleRepository
 from bot.database.repositories.user import UserRepository
+from bot.scheduler import save_runtime_setting
 from bot.services.schedule_parser import ScheduleParser
 from bot.services.schedule_recognizer import ScheduleRecognitionError, ScheduleRecognizer
 from bot.utils.clock import now_local
@@ -31,18 +32,9 @@ router = Router()
 parser = ScheduleParser()
 recognizer = ScheduleRecognizer()
 
-QUEUE_KEY = "config:queue_number"
 # HOE has 6 queues x 2 subqueues; any other one can be typed in
 QUEUE_BUTTONS = [f"{q}.{sub}" for q in range(1, 7) for sub in (1, 2)]
 QUEUE_PATTERN = re.compile(r"\d{1,2}\.\d")
-
-
-async def restore_queue(redis) -> None:
-    """Applies the queue chosen in the bot (stored in Redis) over the .env default."""
-    saved = await redis.get(QUEUE_KEY)
-    if saved:
-        config.QUEUE_NUMBER = saved.decode()
-        logging.info(f"Restored QUEUE_NUMBER={config.QUEUE_NUMBER}")
 
 # Main Schedule Menu
 @router.message(F.text == "📉 Графік")
@@ -329,7 +321,7 @@ async def process_schedule_screenshot(message: Message, state: FSMContext, user_
 # Queue selection (admin only)
 async def _save_queue(state: FSMContext, queue: str) -> None:
     config.QUEUE_NUMBER = queue
-    await state.storage.redis.set(QUEUE_KEY, queue)
+    await save_runtime_setting(state.storage.redis, "QUEUE_NUMBER", queue)
     logging.info(f"Queue changed to {queue}")
 
 @router.message(F.text == "🔢 Черга")

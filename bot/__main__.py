@@ -63,8 +63,6 @@ async def main():
     dp.include_router(generators.router)
     dp.include_router(weather.router)
     
-    await schedule.restore_queue(redis_client)
-
     # Start Scheduler
     from bot.scheduler import start_scheduler, restore_scheduler_settings
     start_scheduler(bot)
