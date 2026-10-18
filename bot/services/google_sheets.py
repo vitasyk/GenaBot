@@ -10,21 +10,22 @@ class GoogleSheetsService:
     """Service for reading worker shift schedule from Google Sheets (calendar format)"""
     
     def __init__(self):
+        self.client = None
+        self.spreadsheet = None
+        self.worksheet = None
         try:
-            self.creds = Credentials.from_service_account_file(
+            creds = Credentials.from_service_account_file(
                 config.GOOGLE_CREDENTIALS_PATH,
                 scopes=['https://www.googleapis.com/auth/spreadsheets.readonly']
             )
-            self.client = gspread.authorize(self.creds)
-            self.spreadsheet = None
-            self.worksheet = None
-            self._initialized = False
+            self.client = gspread.authorize(creds)
         except Exception as e:
-            logging.warning(f"Google Sheets init failed: {e}. Will try on first use.")
-            self._initialized = False
-    
+            logging.warning(f"Google Sheets init failed: {e}")
+
     def _get_worksheet(self, target_date: date) -> gspread.Worksheet:
         """Get or open worksheet for specific date"""
+        if self.client is None:
+            raise ValueError(f"Google Sheets key not found: {config.GOOGLE_CREDENTIALS_PATH}")
         if not config.SCHEDULE_SPREADSHEET_ID:
             raise ValueError("SCHEDULE_SPREADSHEET_ID is not configured")
             
