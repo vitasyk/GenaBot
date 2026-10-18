@@ -182,22 +182,7 @@ dp.update.middleware(ServicesMiddleware(api_client, auth_service))
 
 ## Skills and plugins
 
-Project skills in `.claude/skills/` (Claude Code loads them automatically; other agents read the SKILL.md):
-
-| Skill | Use for |
-|---|---|
-| `aiogram3-bot` | handlers, routers, FSM, keyboards, middleware DI, scheduler |
-| `sqlalchemy-async-alembic` | models, repositories, transactions, Alembic migrations |
-| `pytest-asyncio-bot` | tests for services, repositories, handlers, parsers |
-| `systematic-debugging` | any bug or failing test, before proposing a fix |
-| `test-driven-development` | new logic and bug fixes (failing test first) |
-| `brainstorming`, `writing-plans`, `executing-plans` | new features: idea, then plan, then execution |
-| `postgres-best-practices` | indexes, query performance, schema design |
-| `api-security-best-practices` | access control (ADMIN_IDS/ALLOWED_IDS), secrets, throttling |
-
-Plugins (enabled in `.claude/settings.json`): `ponytail` (smallest complete change; `/ponytail-review`,
-`/ponytail-audit`, `/ponytail-debt`) and `andrej-karpathy-skills` (same spirit; no need to load both).
-Built-in: `/code-review` for bugs, `/simplify` for cleanup, `/security-review` before release.
+Which skills, plugins and MCP to use, how to test and deploy: see [`AGENTS.md`](../AGENTS.md).
 
 Precedence: owner's words > this file > skills > ponytail. Ponytail never cuts tests, validation,
 error handling or access checks. Its `shortcut:` comments are allowed only with a clear limit and
