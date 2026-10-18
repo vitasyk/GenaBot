@@ -4,6 +4,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 import asyncio
 import html
+import logging
 
 from bot.database.models import UserRole
 from bot.database.repositories.user import UserRepository
@@ -103,8 +104,13 @@ async def admin_sessions_list(callback: types.CallbackQuery, bot: Bot):
     )
     builder.row(InlineKeyboardButton(text="🗑️ Видалити ВСІ сесії", callback_data="admin_confirm_delete_all_sessions"))
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel_back"))
-    
-    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+    try:
+        await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    except TelegramBadRequest as e:
+        # e.g. "Delete cancelled" with nothing to delete: the list is unchanged
+        if "message is not modified" not in str(e):
+            raise
 
 async def _admin_session_view_logic(callback: types.CallbackQuery, bot: Bot, session_id: int):
     from bot.database.main import session_maker
@@ -371,7 +377,16 @@ async def admin_next_workers_handler(callback: types.CallbackQuery, bot: Bot):
 
         # 3. Get workers for that time from Sheets
         lookup_dt = next_rt - timedelta(minutes=1)
-        worker_tuples = await asyncio.to_thread(sheets_service.get_workers_for_outage, lookup_dt.hour, lookup_dt.date())
+        try:
+            worker_tuples = await asyncio.to_thread(sheets_service.get_workers_for_outage, lookup_dt.hour, lookup_dt.date())
+        except Exception as e:
+            logging.warning("Next workers: Google Sheets unavailable", exc_info=True)
+            await callback.message.edit_text(
+                f"❌ <b>Google Таблиця недоступна</b>\n{html.escape(str(e))}",
+                reply_markup=InlineKeyboardBuilder().row(InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel_back")).as_markup(),
+                parse_mode="HTML"
+            )
+            return
         
         text = "👷 <b>Наступна заправка</b>\n"
         text += f"⏰ Час відновлення: <code>{next_rt.strftime('%H:%M')}</code> ({next_rt.strftime('%d.%m')})\n\n"

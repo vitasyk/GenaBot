@@ -84,7 +84,7 @@ async def test_only_active_generators_are_listed(db):
 
 async def test_schedule_entries_are_per_queue(db):
     repo = ScheduleRepository(db)
-    day = date(2026, 10, 18)
+    day = date(2001, 1, 1)  # a date no real schedule uses, so local test data can't interfere
     await repo.create_entry(day, "1.1", 14, 18)
     await repo.create_entry(day, "2.1", 8, 10)
     assert [(e.start_hour, e.end_hour) for e in await repo.get_entries_for_date(day, "1.1")] == [(14, 18)]
