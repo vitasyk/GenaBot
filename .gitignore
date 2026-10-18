@@ -161,4 +161,7 @@ alembic/
 # Credentials & Secrets
 credentials/
 *.json
+# Claude Code project config (no secrets) must stay in git
+!.claude/**/*.json
+!.mcp.json
 .env
