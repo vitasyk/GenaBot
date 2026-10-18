@@ -161,5 +161,6 @@ credentials/
 !.claude/**/*.json
 !.mcp.json
 .env
-# Claude Code agent worktrees
+# Claude Code agent worktrees and personal settings
 .claude/worktrees/
+.claude/settings.local.json
