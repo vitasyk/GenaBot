@@ -11,6 +11,7 @@ from bot.database.repositories.logs import LogRepository
 from bot.config import config
 from bot.states import AdminStates, SlackStates
 from bot.services.slack import SlackService
+from bot.scheduler import save_runtime_setting
 
 router = Router()
 
@@ -509,22 +510,23 @@ async def interval_input(message: types.Message, state: FSMContext):
         from bot.scheduler import scheduler
         scheduler.reschedule_job('check_power_outage_job', trigger='interval', minutes=minutes)
         
-        await message.answer(f"✅ Інтервал змінено на <b>{minutes} хв</b>.\n(Зміна збережена в пам'яті).", reply_markup=_get_admin_panel_kb(), parse_mode="HTML")
+        await message.answer(f"✅ Інтервал змінено на <b>{minutes} хв</b>.", reply_markup=_get_admin_panel_kb(), parse_mode="HTML")
         await state.clear()
-        
-    except Exception as e:
-        safe_error = html.escape(str(e))
-        await message.answer(f"⚠️ <b>Помилка:</b>\n{safe_error}\nВведіть число хвилин.", reply_markup=_get_admin_panel_kb(), parse_mode="HTML")
+
+    except (ValueError, AttributeError):  # not a positive integer, or no text in the message
+        await message.answer("⚠️ Введіть ціле число хвилин (від 1).", reply_markup=_get_admin_panel_kb(), parse_mode="HTML")
 
 @router.callback_query(F.data == "admin_toggle_access")
-async def toggle_access_callback(callback: types.CallbackQuery, user_repo: UserRepository):
+async def toggle_access_callback(callback: types.CallbackQuery, state: FSMContext):
     config.RESTRICT_ACCESS = not config.RESTRICT_ACCESS
+    await save_runtime_setting(state.storage.redis, "RESTRICT_ACCESS", config.RESTRICT_ACCESS)
     await admin_panel_back(callback)
     await callback.answer(f"✅ Режим змінено на: {'Обмежений' if config.RESTRICT_ACCESS else 'Публічний'}")
 
 @router.callback_query(F.data == "admin_toggle_notify")
-async def toggle_notify_callback(callback: types.CallbackQuery, user_repo: UserRepository):
+async def toggle_notify_callback(callback: types.CallbackQuery, state: FSMContext):
     config.NOTIFY_WORKERS = not config.NOTIFY_WORKERS
+    await save_runtime_setting(state.storage.redis, "NOTIFY_WORKERS", config.NOTIFY_WORKERS)
     await admin_panel_back(callback)
     await callback.answer(f"✅ Отримувачі: {'Всі працівники' if config.NOTIFY_WORKERS else 'Тільки адміни'}")
 
@@ -689,15 +691,13 @@ async def slack_threshold_input(message: types.Message, state: FSMContext):
             await message.answer("⚠️ Введіть значення від 0 до 100 каністр.")
             return
         
-        # Update configuration (runtime)
         config.FUEL_THRESHOLD_CANS = new_threshold
-        
+        await save_runtime_setting(state.storage.redis, "FUEL_THRESHOLD_CANS", new_threshold)
+
         await state.clear()
         await message.answer(
             f"✅ <b>Поріг оновлено!</b>\n\n"
-            f"Новий поріг: <b>{new_threshold}</b> каністр\n\n"
-            f"<i>Примітка: для збереження після перезапуску додайте в .env:\n"
-            f"FUEL_THRESHOLD_CANS={new_threshold}</i>",
+            f"Новий поріг: <b>{new_threshold}</b> каністр",
             reply_markup=_get_slack_kb(),
             parse_mode="HTML"
         )

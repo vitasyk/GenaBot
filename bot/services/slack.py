@@ -20,5 +20,5 @@ class SlackService:
                         logging.error(f"Slack API error: {response.status} - {body}")
                     else:
                         logging.info("Slack notification sent successfully.")
-        except Exception as e:
-            logging.error(f"Failed to send Slack notification: {e}")
+        except Exception:
+            logging.warning("Failed to send Slack notification", exc_info=True)
