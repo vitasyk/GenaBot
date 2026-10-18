@@ -62,6 +62,22 @@ class GeneratorService:
             await self.logs.log_action(user_id, "UPDATE_SOS", f"Updated SOS instructions for {gen.name}")
         return gen
 
+    async def add_instruction_media(self, user_id: int, gen_id: int, kind: str, file_id: str) -> Generator | None:
+        """Attach a photo/document (Telegram file_id) to the SOS instructions."""
+        gen = await self.repo.get_by_id(gen_id)
+        if gen:
+            # Assign a new list: in-place changes of a JSON column are not tracked by SQLAlchemy
+            gen.instructions_media = [*(gen.instructions_media or []), {"type": kind, "file_id": file_id}]
+            await self.logs.log_action(user_id, "UPDATE_SOS", f"Attached {kind} to SOS of {gen.name}")
+        return gen
+
+    async def clear_instruction_media(self, user_id: int, gen_id: int) -> Generator | None:
+        gen = await self.repo.get_by_id(gen_id)
+        if gen:
+            gen.instructions_media = None
+            await self.logs.log_action(user_id, "UPDATE_SOS", f"Removed SOS attachments of {gen.name}")
+        return gen
+
     async def get_notify_start_status(self) -> bool:
         """Check if global start notifications are enabled"""
         val = await self.redis.get(self.NOTIFY_KEY)

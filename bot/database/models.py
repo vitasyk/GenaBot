@@ -62,6 +62,8 @@ class Generator(Base):
     last_stop_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
     instructions: Mapped[str | None] = mapped_column(Text, nullable=True)  # SOS start-up text (Telegram HTML)
+    # SOS attachments: [{"type": "photo" | "document", "file_id": "..."}]; files live in Telegram
+    instructions_media: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
 class LogEvent(Base):
     __tablename__ = "logs"

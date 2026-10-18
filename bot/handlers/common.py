@@ -1,8 +1,10 @@
 import html
+import logging
 
 from aiogram import Router, F, types
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart, Command
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaDocument, InputMediaPhoto
 from bot.database.repositories.user import UserRepository
 from bot.keyboards.inline_kb import STALE_MENU_TEXT, GenCb, get_sos_kb
 from bot.keyboards.main_kb import get_main_keyboard
@@ -60,7 +62,27 @@ async def sos_generator(callback: types.CallbackQuery, callback_data: GenCb, gen
         return
 
     # instructions are stored as Telegram HTML (admin input via message.html_text)
-    text = f"🔧 <b>{html.escape(gen.name)}</b>\n\n{gen.instructions or SOS_NO_INSTRUCTIONS}"
+    media = gen.instructions_media or []
+    text = f"🔧 <b>{html.escape(gen.name)}</b>\n\n{gen.instructions or ('' if media else SOS_NO_INSTRUCTIONS)}"
     back = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="sos_menu")]])
     await callback.message.edit_text(text, reply_markup=back, parse_mode="HTML")
     await callback.answer()
+    await send_instruction_media(callback.message, media)
+
+
+async def send_instruction_media(message: types.Message, media: list[dict]) -> None:
+    """Photos as one album, PDFs as another (Telegram can't mix them); a single file goes alone."""
+    photos = [m["file_id"] for m in media if m["type"] == "photo"]
+    documents = [m["file_id"] for m in media if m["type"] == "document"]
+    try:
+        if len(photos) == 1:
+            await message.answer_photo(photos[0])
+        elif photos:
+            await message.answer_media_group([InputMediaPhoto(media=f) for f in photos])
+        if len(documents) == 1:
+            await message.answer_document(documents[0])
+        elif documents:
+            await message.answer_media_group([InputMediaDocument(media=f) for f in documents])
+    except TelegramBadRequest:
+        # e.g. a file_id from another bot token; the text part was already shown
+        logging.warning("Failed to send SOS attachments", exc_info=True)

@@ -22,6 +22,7 @@ class AdminStates(StatesGroup):
     waiting_for_sheet_name = State()
     waiting_for_gen_name = State()
     waiting_for_gen_instructions = State()
+    waiting_for_gen_media = State()
 
 class ScheduleStates(StatesGroup):
     """States for manual schedule entry"""

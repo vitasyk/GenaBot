@@ -82,6 +82,23 @@ async def test_only_active_generators_are_listed(db):
     assert [g.name for g in gens] == ["GEN-2 (003) WILSON"]
 
 
+async def test_instruction_media_is_stored_as_json(db):
+    from bot.services.generator import GeneratorService
+    from unittest.mock import AsyncMock, MagicMock
+    repo = GeneratorRepository(db)
+    gen = (await repo.get_all(active_only=True))[0]
+    svc = GeneratorService(repo, MagicMock(log_action=AsyncMock()), MagicMock(), MagicMock())
+
+    await svc.add_instruction_media(1, gen.id, "photo", "file-1")
+    await svc.add_instruction_media(1, gen.id, "document", "file-2")
+    await db.flush()
+
+    from sqlalchemy import select
+    from bot.database.models import Generator
+    stored = await db.scalar(select(Generator.instructions_media).where(Generator.id == gen.id))
+    assert stored == [{"type": "photo", "file_id": "file-1"}, {"type": "document", "file_id": "file-2"}]
+
+
 async def test_schedule_entries_are_per_queue(db):
     repo = ScheduleRepository(db)
     day = date(2001, 1, 1)  # a date no real schedule uses, so local test data can't interfere
