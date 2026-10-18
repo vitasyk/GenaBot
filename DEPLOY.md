@@ -1,69 +1,78 @@
-# Інструкція з розгортання GenaBot на VPS (Docker)
+# Розгортання GenaBot (Docker)
 
-Ця інструкція допоможе вам розгорнути бота на сервері разом із базою даних PostgreSQL та Redis за допомогою Docker Compose.
+У продакшені бот працює в одному Docker-контейнері. База даних — **Supabase Postgres**
+(`DATABASE_URL`), Redis — **Upstash** (`REDIS_URL`). Сервіси `db` і `redis` у
+`docker-compose.yml` потрібні лише для локального тестування (профіль `local`) і в продакшені
+не запускаються.
+
+Схема бази змінюється тільки через Alembic (`alembic/versions`).
 
 ## 1. Підготовка сервера
 
-Переконайтеся, що на вашому VPS встановлено **Docker** та **Docker Compose**.
-
-Якщо ні, встановіть їх:
+Потрібні Docker і Docker Compose v2 (команда `docker compose`):
 ```bash
 sudo apt update
-sudo apt install docker.io docker-compose -y
+sudo apt install docker.io docker-compose-v2 -y
 ```
 
-## 2. Копіювання проекту
+## 2. Налаштування
 
-Клонуйте репозиторій або скопіюйте файли проекту на сервер:
 ```bash
-git clone <URL_ВАШОГО_РЕПОЗИТОРІЮ>
+git clone <URL_РЕПОЗИТОРІЮ>
 cd GenaBot
+cp .env.example .env
 ```
+Заповніть `.env`: `BOT_TOKEN`, `ADMIN_IDS`, `DATABASE_URL` (Supabase pooler),
+`REDIS_URL` (Upstash), ключі погоди та Google Sheets. Файл `google-sheets-key.json`
+покладіть у папку `credentials/`.
 
-## 3. Налаштування
+## 3. Перше розгортання на продакшен-базі (один раз)
 
-1.  **Створіть файл `.env`** (на основі `.env.example`):
-    ```bash
-    cp .env.example .env
-    ```
-    Відредагуйте його:
-    -   `BOT_TOKEN`: Токен вашого бота.
-    -   `ADMIN_IDS`: Список ID адміністраторів.
-    -   `DATABASE_URL`: `postgresql+asyncpg://postgres:postgres@db:5432/genabot` (для Docker).
-    -   `REDIS_URL`: `redis://redis:6379/0` (для Docker).
-    -   Інші налаштування (Weather API, Google Sheets ID тощо).
+Таблиці в Supabase вже існують, а в `alembic_version` записана стара ревізія, якої немає в
+репозиторії. Спочатку зробіть резервну копію бази (Supabase Dashboard → Database → Backups
+або `pg_dump`), потім:
 
-2.  **Зайдіть у папку `credentials`** та додайте туди файл `google-sheets-key.json`.
-
-## 4. Запуск
-
-Запустіть всі сервіси в фоновому режимі:
 ```bash
-docker-compose up -d --build
+docker compose build
+# позначити поточну схему як базову (0001), не змінюючи таблиць
+docker compose run --rm bot alembic stamp --purge 0001
+# застосувати нові міграції (RLS, керування генераторами)
+docker compose run --rm bot alembic upgrade head
+docker compose up -d
 ```
 
-Бот автоматично створить необхідні таблиці в базі даних при першому запуску (через `alembic` або `init.sql`).
+`stamp --purge` потрібен лише один раз. Без нього `alembic upgrade head` завершиться помилкою
+`Can't locate revision identified by 'f3bd722779d8'`.
 
-## 5. Міграція бази даних (Перенесення даних)
+## 4. Оновлення
 
-Якщо у вас є дані в старій базі (наприклад, на Supabase) і ви хочете перенести їх у Docker на сервері:
+```bash
+git pull
+./deploy.sh
+```
+`deploy.sh` збирає образ, застосовує міграції (`alembic upgrade head`) в окремому контейнері і
+лише після цього перезапускає бота. Якщо міграція впала, скрипт зупиняється і старий бот
+продовжує працювати.
 
-1.  Переконайтеся, що в `.env` параметр `DATABASE_URL` веде на **стару** базу (Source).
-2.  Запустіть скрипт міграції:
-    ```bash
-    # Зовні докера (якщо встановлені залежності):
-    python migrate_db.py "postgresql+asyncpg://postgres:postgres@localhost:5432/genabot"
+## 5. Локальний тест (своя база і Redis)
 
-    # АБО всередині контейнера:
-    docker exec -it gena_bot python migrate_db.py "postgresql+asyncpg://postgres:postgres@db:5432/genabot"
-    ```
-3. Після успішної міграції змініть `DATABASE_URL` у `.env` назад на адресу Docker-бази (`db:5432`) та перезапустіть бота:
-    ```bash
-    docker-compose restart bot
-    ```
+Створіть `.env.local` (він у `.gitignore`) — копію `.env` з тестовим токеном бота і
+локальними адресами:
+```
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/genabot
+REDIS_URL=redis://redis:6379/0
+```
+Запуск:
+```bash
+export BOT_ENV_FILE=.env.local
+docker compose --profile local up -d --build db redis
+docker compose run --rm bot alembic upgrade head
+docker compose --profile local up --build
+```
+Видалити локальні дані: `docker compose --profile local down -v`.
 
 ## 6. Корисні команди
 
--   **Перегляд логів**: `docker logs -f gena_bot`
--   **Зупинка**: `docker-compose down`
--   **Оновлення**: `git pull && docker-compose up -d --build`
+- Логи: `docker compose logs -f bot`
+- Поточна ревізія бази: `docker compose run --rm bot alembic current`
+- Зупинка: `docker compose down`

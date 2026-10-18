@@ -1,21 +1,36 @@
+import html
+import json
 import logging
+from collections.abc import Sequence
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy.orm import sessionmaker
-from datetime import datetime, timedelta
+from datetime import datetime
+from redis.asyncio import Redis
 
 from bot.config import config
 from bot.database.main import session_maker
 from bot.database.repositories.inventory import InventoryRepository
 from bot.database.repositories.generator import GeneratorRepository
-from bot.database.models import GenStatus
+from bot.database.models import Generator, GenStatus
+from bot.services.notifier import NotifierService
 from bot.services.weather import WeatherService
 from aiogram import Bot
 import zoneinfo
 
 # Initialize scheduler with configured timezone
 scheduler = AsyncIOScheduler(timezone=zoneinfo.ZoneInfo(config.TIMEZONE))
+
+DEFAULT_OUTAGE_CHECK_MINUTES = 1
+MAINTENANCE_INTERVAL_HOURS = 100
+MAINTENANCE_MARK_KEY = "maintenance:last_mark:{gen_id}"
+# config attribute -> Redis key for values admins change at runtime
+RUNTIME_SETTING_KEYS = {
+    "RESTRICT_ACCESS": "config:restrict_access",
+    "NOTIFY_WORKERS": "config:notify_workers",
+    "FUEL_THRESHOLD_CANS": "config:fuel_threshold_cans",
+}
 
 async def check_rotation_needed(bot: Bot):
     async with session_maker() as session:
@@ -81,23 +96,37 @@ async def check_rotation_needed(bot: Bot):
             notifier = NotifierService(bot)
             await notifier.notify_all(msg)
 
+async def notify_maintenance_due(gens: Sequence[Generator], redis: Redis, notifier: NotifierService) -> None:
+    """Alert once each time a generator's total hours cross a new MAINTENANCE_INTERVAL_HOURS mark.
+
+    The last notified mark per generator lives in Redis. With no stored mark (first run)
+    the current one is stored silently, so old marks don't trigger alerts.
+    """
+    for g in gens:
+        total = g.total_hours_run or 0.0
+        mark = int(total // MAINTENANCE_INTERVAL_HOURS)
+        key = MAINTENANCE_MARK_KEY.format(gen_id=g.id)
+        stored = await redis.get(key)
+        last_mark = int(stored) if stored is not None else None
+        if last_mark == mark:
+            continue
+        await redis.set(key, mark)
+        if last_mark is not None and mark > last_mark:
+            await notifier.notify_all(
+                f"🔧 <b>ТЕХНІЧНЕ ОБСЛУГОВУВАННЯ</b>\nГенератор {html.escape(g.name)} "
+                f"відпрацював {total:.1f} год.\nЧас перевірити масло!"
+            )
+
+
 async def check_maintenance_needed(bot: Bot):
     async with session_maker() as session:
-        gen_repo = GeneratorRepository(session)
-        gens = await gen_repo.get_all()
-        
-        from bot.services.notifier import NotifierService
-        notifier = NotifierService(bot)
-        
-        for g in gens:
-            total = g.total_hours_run or 0.0
-            # Example: Alert every 100 hours
-            # Or if hours since last maintenance > 100
-            # For simplicity, let's just alert if total is near a multiple of 100 for now, 
-            # but better logic: track 'hours_since_last_oil_change'.
-            # We'll use 100h threshold.
-            if total > 0 and (total % 100) < 0.5: # Simple trigger near the mark
-                 await notifier.notify_all(f"🔧 <b>ТЕХНІЧНЕ ОБСЛУГОВУВАННЯ</b>\nГенератор {g.name} відпрацював {total:.1f} год.\nЧас перевірити масло!")
+        gens = await GeneratorRepository(session).get_all()
+
+    redis = Redis.from_url(config.REDIS_URL.get_secret_value())
+    try:
+        await notify_maintenance_due(gens, redis, NotifierService(bot))
+    finally:
+        await redis.close()
 
 async def weather_check_job(bot: Bot):
     from bot.services.notifier import NotifierService
@@ -125,9 +154,7 @@ async def warming_check_job(bot: Bot):
     from bot.services.generator import GeneratorService
     from bot.database.repositories.generator import GeneratorRepository
     from bot.database.repositories.logs import LogRepository
-    from redis.asyncio import Redis
-    from bot.config import config
-    
+
     redis_client = Redis.from_url(config.REDIS_URL.get_secret_value())
     
     async with session_maker() as session:
@@ -154,50 +181,48 @@ def start_scheduler(bot: Bot):
     # Check weather daily at 8:00 AM
     scheduler.add_job(weather_check_job, CronTrigger(hour=8, minute=0), args=[bot])
     
-    # Check Power Outage (Dynamic Interval)
-    # Default 1 min for near-real-time reactive notifications
-    interval_minutes = 1
-    
-    try:
-        # Try to read from Redis synchronously? 
-        # RedisStorage is async. We can't await here easily in sync function.
-        # However, scheduler is async, but setup is often sync.
-        # Workaround: Just use default here, and let the Admin handler update it at runtime.
-        # BUT user wanted persistence.
-        # We can use `asyncio.create_task` to update it after startup?
-        # Or just make start_scheduler async?
-        pass
-    except:
-        pass
-
-    # We use explicit ID so we can reschedule it later
+    # Check Power Outage: 1 min by default; the admin-set interval is restored from Redis
+    # by restore_scheduler_settings. Explicit ID so it can be rescheduled.
     scheduler.add_job(
-        check_power_outage_job, 
-        IntervalTrigger(minutes=interval_minutes), 
+        check_power_outage_job,
+        IntervalTrigger(minutes=DEFAULT_OUTAGE_CHECK_MINUTES),
         args=[bot],
         id="check_power_outage_job",
         replace_existing=True
     )
-    
+
     scheduler.start()
 
-async def restore_scheduler_settings(bot: Bot):
-    """Called from main to restore dynamic settings"""
-    from aiogram.fsm.storage.redis import RedisStorage
-    from bot.config import config
-    
-    # We need access to the storage used by Dispatcher... 
-    # Or just create a new client since it's Redis.
-    storage = RedisStorage.from_url(config.REDIS_URL.get_secret_value())
-    
+
+async def save_runtime_setting(redis: Redis, name: str, value: bool | float) -> None:
+    """Persist an admin-changed config value so it survives a restart."""
+    await redis.set(RUNTIME_SETTING_KEYS[name], json.dumps(value))
+
+
+async def restore_runtime_settings(redis: Redis) -> None:
+    """Apply admin-changed config values saved in Redis over the .env defaults."""
+    for name, key in RUNTIME_SETTING_KEYS.items():
+        raw = await redis.get(key)
+        if raw is None:
+            continue
+        default = getattr(config, name)
+        try:
+            value = json.loads(raw)
+            if isinstance(default, bool) and not isinstance(value, bool):
+                raise ValueError("expected a boolean")
+            setattr(config, name, type(default)(value))
+        except (ValueError, TypeError):
+            logging.warning("Ignoring invalid saved setting %s=%r", name, raw, exc_info=True)
+
+
+async def restore_scheduler_settings(redis: Redis) -> None:
+    """Called from main at startup: restores the check interval and runtime settings."""
     try:
-        # storage.redis is a redis.asyncio.Redis instance
-        interval = await storage.redis.get("config:schedule_interval")
+        interval = await redis.get("config:schedule_interval")
         if interval:
             minutes = int(interval)
             scheduler.reschedule_job('check_power_outage_job', trigger='interval', minutes=minutes)
-            logging.info(f"Restored schedule check interval: {minutes} min")
-    except Exception as e:
-        logging.error(f"Failed to restore scheduler settings: {e}")
-    finally:
-        await storage.close()
+            logging.info("Restored schedule check interval: %s min", minutes)
+        await restore_runtime_settings(redis)
+    except Exception:
+        logging.exception("Failed to restore scheduler settings")

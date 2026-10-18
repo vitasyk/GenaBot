@@ -1,41 +1,31 @@
-version: '3.8'
-
 services:
   bot:
     build: .
     container_name: gena_bot
     restart: always
     env_file:
-      - .env
+      # production: .env (Supabase + Upstash); local test: BOT_ENV_FILE=.env.local
+      - ${BOT_ENV_FILE:-.env}
     volumes:
       - ./credentials:/app/credentials
       - ./logs:/app/logs
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_started
 
+  # Local testing only: `docker compose --profile local up`. Production uses Supabase and Upstash.
   db:
+    profiles: ["local"]
     image: postgres:15-alpine
     container_name: gena_db
-    restart: always
     environment:
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
-      POSTGRES_DB: ${DB_NAME:-genabot}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: genabot
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
-      interval: 5s
-      timeout: 5s
-      retries: 5
 
   redis:
+    profiles: ["local"]
     image: redis:7-alpine
     container_name: gena_redis
-    restart: always
     volumes:
       - redis_data:/data
 
