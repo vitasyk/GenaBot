@@ -11,7 +11,7 @@ from bot.database.main import session_maker
 from bot.database.repositories.session import OPEN_STATUSES, SessionRepository
 from bot.services.notifier import NotifierService
 from bot.services.generator import GeneratorService
-from bot.services.inventory import InventoryService
+from bot.services.inventory import LITERS_PER_CAN, InventoryService
 from bot.database.models import SessionStatus
 from bot.keyboards.inline_kb import STALE_MENU_TEXT, GenCb, status_icon
 from bot.keyboards.session_kb import (
@@ -232,7 +232,7 @@ async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot:
     user_id = event.from_user.id
     antigel_added = data.get("antigel_added")
     total_liters = sum(gen_fuel_data.values())
-    total_cans = total_liters / 20.0
+    total_cans = total_liters / LITERS_PER_CAN
     gen_summary = ", ".join(f"{name}: {liters}л" for name, liters in gen_fuel_data.items())
 
     # Complete first: only the worker who actually closes the session deducts fuel
@@ -252,7 +252,7 @@ async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot:
     new_stock_cans = None
     if inventory_service:
         try:
-            new_stock_cans = await inventory_service.take_fuel(user_id, total_liters) / 20.0
+            new_stock_cans = await inventory_service.take_fuel(user_id, total_liters) / LITERS_PER_CAN
         except Exception:
             logging.exception(f"Failed to deduct fuel for session {session_id}, user_id={user_id}")
 

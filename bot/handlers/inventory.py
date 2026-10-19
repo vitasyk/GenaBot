@@ -10,8 +10,8 @@ from bot.keyboards.refuel_kb import get_refuel_kb, get_refuel_accumulator_kb
 from bot.keyboards.inventory_kb import get_inventory_kb
 from bot.services.antigel import format_advice
 from bot.services.generator import GeneratorService
-from bot.services.inventory import InventoryService
-from bot.utils.clock import now_local
+from bot.services.inventory import LITERS_PER_CAN, InventoryService
+from bot.utils.clock import now_local, utc_to_local
 from aiogram.fsm.context import FSMContext
 from bot.states import RefuelAccumulatorStates
 
@@ -36,7 +36,7 @@ async def _stock_text(inventory_service: InventoryService) -> str:
     text += f"💧 Обсяг: {stats['stock_liters']} літрів\n\n"
 
     if stats["last_refill_date"]:
-        text += f"📅 Останнє поповнення: {stats['last_refill_date'].strftime('%d.%m.%Y')}\n"
+        text += f"📅 Останнє поповнення: {utc_to_local(stats['last_refill_date']).strftime('%d.%m.%Y')}\n"
 
     if avg_h > 0.001:
         days_left = hours_left / 24.0
@@ -116,7 +116,7 @@ async def stock_history_callback(callback: types.CallbackQuery, inventory_servic
     text += "➖➖➖➖➖➖➖➖➖➖\n"
 
     for item in history:
-        dt = item['date'].strftime('%d.%m %H:%M')
+        dt = utc_to_local(item['date']).strftime('%d.%m %H:%M')
         amount = item['amount']
         user = item['user']
         # Try to clean up amount string if it contains "Taken: "
@@ -178,7 +178,7 @@ async def stock_control_callback(callback: types.CallbackQuery, inventory_servic
         await inventory_service.add_cans(callback.from_user.id, amount)
         msg = f"✅ Додано {amount} шт."
     else:
-        await inventory_service.take_fuel(callback.from_user.id, abs(amount) * 20)
+        await inventory_service.take_fuel(callback.from_user.id, abs(amount) * LITERS_PER_CAN)
         msg = f"✅ Вилучено {abs(amount)} шт."
 
     text = await _stock_text(inventory_service)
@@ -269,7 +269,7 @@ async def refuel_accumulator_done(callback: types.CallbackQuery, state: FSMConte
         await callback.answer()
         raise
 
-    new_amount_cans = new_amount_liters / 20.0
+    new_amount_cans = new_amount_liters / LITERS_PER_CAN
 
     # 3. Check Anti-Gel Threshold
     kb_buttons = [

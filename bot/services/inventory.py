@@ -5,7 +5,7 @@ from bot.database.repositories.user import UserRepository
 from bot.services.slack import SlackService
 from bot.config import config
 from aiogram import Bot
-from bot.utils.clock import utcnow
+from bot.utils.clock import local_to_utc, utc_to_local, utcnow
 
 LITERS_PER_CAN = 20
 
@@ -59,12 +59,12 @@ class InventoryService:
         
         # Merge date from new_date and time from current last_event
         from datetime import datetime
-        updated_ts = datetime.combine(new_date.date(), last_event.timestamp.time())
-        
-        last_event.timestamp = updated_ts
+        # new_date is a Kyiv date, the log timestamp is naive UTC
+        local_ts = datetime.combine(new_date.date(), utc_to_local(last_event.timestamp).time())
+        last_event.timestamp = local_to_utc(local_ts)
         await self.repo.session.commit()
         
-        await self.logs.log_action(user_id, "CORRECT_REFILL_DATE", f"Updated last refill to {updated_ts.strftime('%d.%m.%Y %H:%M')}")
+        await self.logs.log_action(user_id, "CORRECT_REFILL_DATE", f"Updated last refill to {local_ts.strftime('%d.%m.%Y %H:%M')}")
         return True
 
     async def _alert_admins(self, text: str):

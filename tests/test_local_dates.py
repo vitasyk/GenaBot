@@ -67,3 +67,25 @@ async def test_stock_today_button_uses_kyiv_date(monkeypatch):
     today = markup.inline_keyboard[0][0]
     assert today.text == "Сьогодні"
     assert today.callback_data == "stock_set_date_2026-11-02"
+
+
+async def test_refill_date_correction_keeps_kyiv_time():
+    from bot.services.inventory import InventoryService
+
+    # Refill logged at 22:30 UTC on 2026-11-01 = 00:30 Kyiv on 2026-11-02
+    event = MagicMock(timestamp=datetime(2026, 11, 1, 22, 30))
+    logs = MagicMock(get_last_action=AsyncMock(return_value=event), log_action=AsyncMock())
+    repo = MagicMock(session=MagicMock(commit=AsyncMock()))
+    service = InventoryService(repo, logs, MagicMock(), MagicMock(), MagicMock())
+
+    # Admin says it actually was on 2026-11-05 (Kyiv)
+    assert await service.update_last_refill_date(1, datetime(2026, 11, 5))
+
+    # 00:30 Kyiv on 2026-11-05 is 22:30 UTC on 2026-11-04
+    assert event.timestamp == datetime(2026, 11, 4, 22, 30)
+
+
+def test_utc_local_round_trip():
+    utc = datetime(2026, 7, 1, 21, 15)  # summer, UTC+3
+    assert clock.utc_to_local(utc) == datetime(2026, 7, 2, 0, 15)
+    assert clock.local_to_utc(clock.utc_to_local(utc)) == utc

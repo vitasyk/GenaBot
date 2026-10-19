@@ -18,3 +18,13 @@ def utcnow() -> datetime:
     Replaces the deprecated datetime.utcnow().
     """
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def utc_to_local(dt: datetime) -> datetime:
+    """Naive UTC (as stored in logs/generators) -> naive config.TIMEZONE time."""
+    return dt.replace(tzinfo=UTC).astimezone(ZoneInfo(config.TIMEZONE)).replace(tzinfo=None)
+
+
+def local_to_utc(dt: datetime) -> datetime:
+    """Naive config.TIMEZONE time -> naive UTC for storing in logs/generators."""
+    return dt.replace(tzinfo=ZoneInfo(config.TIMEZONE)).astimezone(UTC).replace(tzinfo=None)
