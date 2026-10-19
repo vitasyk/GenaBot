@@ -119,15 +119,11 @@ async def notify_maintenance_due(gens: Sequence[Generator], redis: Redis, notifi
             )
 
 
-async def check_maintenance_needed(bot: Bot):
+async def check_maintenance_needed(bot: Bot, redis: Redis):
     async with session_maker() as session:
         gens = await GeneratorRepository(session).get_all()
 
-    redis = Redis.from_url(config.REDIS_URL.get_secret_value())
-    try:
-        await notify_maintenance_due(gens, redis, NotifierService(bot))
-    finally:
-        await redis.close()
+    await notify_maintenance_due(gens, redis, NotifierService(bot))
 
 async def weather_check_job(bot: Bot):
     from bot.services.notifier import NotifierService
@@ -145,69 +141,58 @@ async def weather_check_job(bot: Bot):
     # but daily report covers it for 8 AM. 
     # If we wanted continuous monitoring, we'd add another job.
 
-async def antigel_reminder_job(bot: Bot):
+async def antigel_reminder_job(bot: Bot, redis: Redis):
     """Morning reminder while it's still warm enough for the additive to work."""
     from bot.services.antigel import AntigelService, format_advice
-    redis = Redis.from_url(config.REDIS_URL.get_secret_value())
-    try:
-        async with session_maker() as session:
-            gens = await GeneratorRepository(session).get_all(active_only=True)
-        antigel = AntigelService(WeatherService(), redis)
-        for g in gens:
-            advice = await antigel.advise_for(g)
-            if advice.needed:
-                await NotifierService(bot).notify_all(format_advice(g.name, advice))
-    finally:
-        await redis.close()
+    async with session_maker() as session:
+        gens = await GeneratorRepository(session).get_all(active_only=True)
+    antigel = AntigelService(WeatherService(), redis)
+    for g in gens:
+        advice = await antigel.advise_for(g)
+        if advice.needed:
+            await NotifierService(bot).notify_all(format_advice(g.name, advice))
 
-async def check_power_outage_job(bot: Bot):
+async def check_power_outage_job(bot: Bot, redis: Redis):
     from bot.services.session_service import SessionService
-    redis = Redis.from_url(config.REDIS_URL.get_secret_value())
-    try:
-        async with session_maker() as session:
-            service = SessionService(session, bot=bot, redis=redis)
-            await service.check_power_outage()
-    finally:
-        await redis.close()
+    async with session_maker() as session:
+        service = SessionService(session, bot=bot, redis=redis)
+        await service.check_power_outage()
 
-async def warming_check_job(bot: Bot):
+async def warming_check_job(bot: Bot, redis: Redis):
     from bot.services.generator import GeneratorService
     from bot.database.repositories.generator import GeneratorRepository
     from bot.database.repositories.logs import LogRepository
 
-    redis_client = Redis.from_url(config.REDIS_URL.get_secret_value())
-    
     async with session_maker() as session:
         gen_repo = GeneratorRepository(session)
         log_repo = LogRepository(session)
         from bot.services.notifier import NotifierService
         notifier = NotifierService(bot)
-        
-        service = GeneratorService(gen_repo, log_repo, notifier, redis_client)
-        await service.check_warming_notifications()
-    
-    await redis_client.close()
 
-def start_scheduler(bot: Bot):
+        service = GeneratorService(gen_repo, log_repo, notifier, redis)
+        await service.check_warming_notifications()
+
+def start_scheduler(bot: Bot, redis: Redis):
+    """Jobs share the bot's Redis client instead of opening a connection per run."""
     # Check rotation every 30 mins
     scheduler.add_job(check_rotation_needed, IntervalTrigger(minutes=30), args=[bot])
-    
+
     # Check maintenance every 12 hours
-    scheduler.add_job(check_maintenance_needed, IntervalTrigger(hours=12), args=[bot])
-    
+    scheduler.add_job(check_maintenance_needed, IntervalTrigger(hours=12), args=[bot, redis])
+
     # Check warming every 1 hour
-    scheduler.add_job(warming_check_job, IntervalTrigger(hours=1), args=[bot])
-    
+    scheduler.add_job(warming_check_job, IntervalTrigger(hours=1), args=[bot, redis])
+
     # Check weather daily at 8:00 AM
     scheduler.add_job(weather_check_job, CronTrigger(hour=8, minute=0), args=[bot])
-    scheduler.add_job(antigel_reminder_job, CronTrigger(hour=8, minute=5), args=[bot])
-    
+    scheduler.add_job(antigel_reminder_job, CronTrigger(hour=8, minute=5), args=[bot, redis])
+
     # Check Power Outage: 1 min by default; the admin-set interval is restored from Redis
     # by restore_scheduler_settings. Explicit ID so it can be rescheduled.
     scheduler.add_job(
         check_power_outage_job,
         IntervalTrigger(minutes=DEFAULT_OUTAGE_CHECK_MINUTES),
-        args=[bot],
+        args=[bot, redis],
         id="check_power_outage_job",
         replace_existing=True
     )

@@ -59,7 +59,7 @@ async def main():
     
     # Start Scheduler
     from bot.scheduler import start_scheduler, restore_scheduler_settings
-    start_scheduler(bot)
+    start_scheduler(bot, redis_client)
     await restore_scheduler_settings(redis_client)
     
     logging.info("Bot started and polling...")
