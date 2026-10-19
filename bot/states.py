@@ -33,6 +33,8 @@ class ScheduleStates(StatesGroup):
     waiting_for_download_confirm = State()
     waiting_for_screenshot = State()
     waiting_for_queue = State()
+    waiting_for_address = State()
+    waiting_for_queue_streets = State()
 
 class SlackStates(StatesGroup):
     """States for Slack configuration"""

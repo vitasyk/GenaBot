@@ -38,6 +38,7 @@ def get_schedule_menu_kb(is_admin: bool = False) -> ReplyKeyboardMarkup:
     
     # Public buttons (available to all)
     keyboard.append([KeyboardButton(text="📋 Переглянути графік"), KeyboardButton(text="🌐 Завантажити з HOE")])
+    keyboard.append([KeyboardButton(text="🏠 Черга за адресою"), KeyboardButton(text="📋 Вулиці черги")])
     keyboard.append([KeyboardButton(text="🔙 Головне меню")])
     
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
