@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from aiogram.types import CallbackQuery, Message
 
+from bot.config import config
 from bot.database.models import User, UserRole
 from bot.middlewares.access import ACCESS_DENIED_TEXT, AccessMiddleware
 
@@ -58,11 +59,46 @@ async def test_start_passes_for_unknown_user():
 
 
 async def test_worker_and_admin_pass():
-    for role in (UserRole.worker, UserRole.admin):
+    # conftest: ADMIN_IDS=[1], ALLOWED_IDS=[2]
+    for role, user_id in ((UserRole.worker, 2), (UserRole.admin, 1)):
         handler = AsyncMock(return_value="ok")
         msg = _message("⚡ Статус")
-        assert await AccessMiddleware()(handler, msg, _data(role)) == "ok"
+        assert await AccessMiddleware()(handler, msg, _data(role, user_id)) == "ok"
         msg.answer.assert_not_awaited()
 
         handler = AsyncMock(return_value="ok")
-        assert await AccessMiddleware()(handler, _callback(), _data(role)) == "ok"
+        assert await AccessMiddleware()(handler, _callback(), _data(role, user_id)) == "ok"
+
+
+async def test_revoked_worker_is_denied_and_blocked_in_db(monkeypatch):
+    monkeypatch.setattr(config, "RESTRICT_ACCESS", True)
+    handler = AsyncMock()
+    msg = _message("⚡ Статус")
+    data = _data(UserRole.worker, user_id=42)  # not in ALLOWED_IDS any more
+
+    await AccessMiddleware()(handler, msg, data)
+
+    handler.assert_not_awaited()
+    msg.answer.assert_awaited_once_with(ACCESS_DENIED_TEXT)
+    user = await data["user_repo"].get_by_id(42)
+    assert user.role == UserRole.blocked
+
+
+async def test_public_access_lets_blocked_user_through(monkeypatch):
+    monkeypatch.setattr(config, "RESTRICT_ACCESS", False)
+    handler = AsyncMock(return_value="ok")
+    data = _data(UserRole.blocked, user_id=42)
+
+    assert await AccessMiddleware()(handler, _callback(), data) == "ok"
+    user = await data["user_repo"].get_by_id(42)
+    assert user.role == UserRole.worker
+
+
+async def test_admin_always_passes(monkeypatch):
+    monkeypatch.setattr(config, "RESTRICT_ACCESS", True)
+    handler = AsyncMock(return_value="ok")
+    data = _data(UserRole.blocked, user_id=1)
+
+    assert await AccessMiddleware()(handler, _message("⚡ Статус"), data) == "ok"
+    user = await data["user_repo"].get_by_id(1)
+    assert user.role == UserRole.admin

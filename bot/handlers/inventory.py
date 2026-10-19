@@ -11,6 +11,7 @@ from bot.keyboards.inventory_kb import get_inventory_kb
 from bot.services.antigel import format_advice
 from bot.services.generator import GeneratorService
 from bot.services.inventory import InventoryService
+from bot.utils.clock import now_local
 from aiogram.fsm.context import FSMContext
 from bot.states import RefuelAccumulatorStates
 
@@ -77,9 +78,9 @@ async def stock_date_selector_callback(callback: types.CallbackQuery, user_repo:
         return
 
     # Generate dates for the last 7 days
-    from datetime import datetime, timedelta
+    from datetime import timedelta
     builder = InlineKeyboardBuilder()
-    now = datetime.now()
+    now = now_local()  # Kyiv date: the container clock is UTC
 
     # 2 rows of 4 buttons
     for i in range(7):
