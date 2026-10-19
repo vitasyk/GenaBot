@@ -9,7 +9,7 @@ from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.config import config
-from bot.handlers import schedule
+from bot.handlers.schedule import _common, manual, queue
 from bot.scheduler import restore_runtime_settings
 from bot.services.schedule_recognizer import RecognizedSchedule, ScheduleRecognitionError, ScheduleRecognizer
 from bot.states import ScheduleStates
@@ -37,8 +37,8 @@ def test_now_local_is_kyiv_time_not_container_utc():
 
 
 def test_hours_to_ranges():
-    assert schedule._hours_to_ranges([15, 14, 22, 23, 3]) == [(3, 4), (14, 16), (22, 24)]
-    assert schedule._hours_to_ranges([]) == []
+    assert _common._hours_to_ranges([15, 14, 22, 23, 3]) == [(3, 4), (14, 16), (22, 24)]
+    assert _common._hours_to_ranges([]) == []
 
 
 async def test_date_after_photo_goes_straight_to_confirmation():
@@ -47,7 +47,7 @@ async def test_date_after_photo_goes_straight_to_confirmation():
     await state.update_data(periods=[[14, 18]])
     await state.set_state(ScheduleStates.waiting_for_date)
 
-    await schedule.process_date_input(message("Завтра"), state, user_repo=MagicMock())
+    await manual.process_date_input(message("Завтра"), state, user_repo=MagicMock())
 
     assert await state.get_state() == ScheduleStates.confirming.state
     data = await state.get_data()
@@ -57,7 +57,7 @@ async def test_date_after_photo_goes_straight_to_confirmation():
 async def test_manual_date_without_photo_asks_for_periods():
     state = fsm()
     await state.set_state(ScheduleStates.waiting_for_date)
-    await schedule.process_date_input(message("05.02"), state, user_repo=MagicMock())
+    await manual.process_date_input(message("05.02"), state, user_repo=MagicMock())
     assert await state.get_state() == ScheduleStates.waiting_for_periods.state
 
 
@@ -67,7 +67,7 @@ async def test_periods_with_minutes_are_rejected_not_truncated(text):
     state = fsm()
     await state.set_state(ScheduleStates.waiting_for_periods)
     msg = message(text)
-    await schedule.process_periods_input(msg, state, schedule_repo=MagicMock(), user_repo=MagicMock())
+    await manual.process_periods_input(msg, state, schedule_repo=MagicMock(), user_repo=MagicMock())
     reply = msg.answer.call_args.args[0]
     assert "Лише цілі години" in reply and "<b>" not in reply
     assert await state.get_state() == ScheduleStates.waiting_for_periods.state
@@ -80,10 +80,10 @@ async def test_queue_input_is_validated_and_saved(fake_redis, monkeypatch):
     await state.set_state(ScheduleStates.waiting_for_queue)
 
     bad = message("abc")
-    await schedule.queue_input(bad, state)
+    await queue.queue_input(bad, state)
     assert config.QUEUE_NUMBER == "1.1"
 
-    await schedule.queue_input(message("4,2"), state)
+    await queue.queue_input(message("4,2"), state)
     assert config.QUEUE_NUMBER == "4.2"
 
     monkeypatch.setattr(config, "QUEUE_NUMBER", "1.1")  # restart: .env default, then Redis wins
