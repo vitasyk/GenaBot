@@ -7,7 +7,6 @@ _TEST_ENV = {
     "ALLOWED_IDS": "[2]",
     "DATABASE_URL": "postgresql+asyncpg://test:test@localhost:5432/test",
     "REDIS_URL": "redis://localhost:6379/0",
-    "SECRET_KEY": "test",
     "WEATHER_API_KEY": "test",
     "CITY_LAT": "49.42",
     "CITY_LON": "26.98",

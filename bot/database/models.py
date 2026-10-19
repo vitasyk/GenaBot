@@ -1,8 +1,11 @@
 from datetime import datetime
-from enum import Enum
+from enum import Enum, StrEnum
 from sqlalchemy import BigInteger, Boolean, String, Text, DateTime, ForeignKey, Integer, Float, Date, JSON, true
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.ext.asyncio import AsyncAttrs
+
+from bot.utils.clock import utcnow
 
 class Base(AsyncAttrs, DeclarativeBase):
     pass
@@ -19,7 +22,7 @@ class GenStatus(str, Enum):
     running = "running"
     standby = "standby"
 
-class SessionStatus(str, Enum):
+class SessionStatus(StrEnum):  # StrEnum: f"{status}" gives the value, not "SessionStatus.x"
     pending = "pending"
     in_progress = "in_progress"
     completed = "completed"
@@ -72,16 +75,7 @@ class LogEvent(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     action: Mapped[str] = mapped_column(String)
     details: Mapped[str] = mapped_column(String, nullable=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-class Shift(Base):
-    __tablename__ = "shifts"
-    
-    id: Mapped[int] = mapped_column(primary_key=True)
-    worker_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
-    shift_date: Mapped[datetime] = mapped_column(Date)
-    start_time: Mapped[datetime] = mapped_column(DateTime)
-    end_time: Mapped[datetime] = mapped_column(DateTime)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 class ScheduleEntry(Base):
     """Manual schedule entry for power outages"""
@@ -92,21 +86,8 @@ class ScheduleEntry(Base):
     queue: Mapped[str] = mapped_column(String, default="1.1")  # 1.1, 1.2, etc.
     start_hour: Mapped[int] = mapped_column(Integer, nullable=False)  # 0-23
     end_hour: Mapped[int] = mapped_column(Integer, nullable=False)  # 0-23 (exclusive)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=True)
-
-class WorkerShift(Base):
-    __tablename__ = "worker_shifts"
-    
-    id: Mapped[int] = mapped_column(primary_key=True)
-    date: Mapped[datetime] = mapped_column(Date)
-    shift_number: Mapped[int] = mapped_column(Integer)  # 1 or 2
-    worker1_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    worker2_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    worker3_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
-    start_time: Mapped[str] = mapped_column(String)  # "08:00"
-    end_time: Mapped[str] = mapped_column(String)    # "20:00"
-    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class RefuelSession(Base):
     __tablename__ = "refuel_sessions"
@@ -115,7 +96,12 @@ class RefuelSession(Base):
     start_time: Mapped[datetime] = mapped_column(DateTime) # Estimated outage start
     end_time: Mapped[datetime] = mapped_column(DateTime, nullable=True) # Actual completion time
     deadline: Mapped[datetime] = mapped_column(DateTime)  # Expected power restoration (deadline)
-    status: Mapped[str] = mapped_column(String, default=SessionStatus.pending.value)
+    # native_enum=False + length=None keeps the existing plain VARCHAR column: no schema change
+    status: Mapped[SessionStatus] = mapped_column(
+        SAEnum(SessionStatus, native_enum=False, length=None, validate_strings=True,
+               values_callable=lambda e: [m.value for m in e]),
+        default=SessionStatus.pending,
+    )
     
     # Workers on shift
     worker1_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
@@ -132,5 +118,5 @@ class RefuelSession(Base):
     cans: Mapped[float] = mapped_column(Float, nullable=True)
     notes: Mapped[str] = mapped_column(String, nullable=True)
     
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     completed_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)

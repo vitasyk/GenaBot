@@ -16,13 +16,9 @@ class Settings(BaseSettings):
     
     # Logging
     LOG_LEVEL: str = "INFO"
-    LOG_FORMAT: str = "console"
     
     # Timezone
     TIMEZONE: str = "Europe/Kiev"
-    
-    # Security
-    SECRET_KEY: SecretStr
     
     # Weather
     WEATHER_API_KEY: SecretStr
@@ -49,6 +45,7 @@ class Settings(BaseSettings):
     FUEL_CFPP_C: float = -5.0
     ANTIGEL_ML_PER_LITER: float = 1.0
     
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # extra="ignore": old .env files still carry retired keys (SECRET_KEY, LOG_FORMAT)
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 config = Settings()
