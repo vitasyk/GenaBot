@@ -5,6 +5,9 @@ from bot.database.repositories.user import UserRepository
 from bot.services.slack import SlackService
 from bot.config import config
 from aiogram import Bot
+from bot.utils.clock import utcnow
+
+LITERS_PER_CAN = 20
 
 class InventoryService:
     def __init__(self, inventory_repo: InventoryRepository, log_repo: LogRepository, user_repo: UserRepository, bot: Bot, slack_service: SlackService):
@@ -25,10 +28,10 @@ class InventoryService:
         # Check for critical alert (e.g. less than 2 cans = 40L)
         # 1. Telegram Alert
         if new_amount < 40:
-             await self._alert_admins(f"⚠️ <b>CRITICAL FUEL ALERT!</b>\nRemaining: {new_amount}L ({new_amount/20.0:.1f} cans)")
+             await self._alert_admins(f"⚠️ <b>CRITICAL FUEL ALERT!</b>\nRemaining: {new_amount}L ({new_amount/LITERS_PER_CAN:.1f} cans)")
         
         # 2. Slack Alert (Configurable)
-        current_cans = new_amount / 20.0
+        current_cans = new_amount / LITERS_PER_CAN
         if current_cans < config.FUEL_THRESHOLD_CANS:
              await self.slack.send_message(
                  f"⛽ *Low Fuel Alert*\n"
@@ -39,7 +42,7 @@ class InventoryService:
         return new_amount
 
     async def add_cans(self, user_id: int, cans: int) -> int:
-        liters = cans * 20
+        liters = cans * LITERS_PER_CAN
         new_amount = await self.repo.update_stock(liters)
         await self.logs.log_action(user_id, "ADD_FUEL", f"Added: {cans} cans ({liters}L). Total: {new_amount}L")
         return new_amount
@@ -70,11 +73,11 @@ class InventoryService:
         await notifier.notify_all(text)
 
     async def get_detailed_stats(self):
-        from datetime import datetime, timedelta
+        from datetime import timedelta
         
         # 1. Current Stock
         stock_liters = await self.repo.get_stock()
-        stock_cans = stock_liters / 20.0
+        stock_cans = stock_liters / LITERS_PER_CAN
         
         # 2. Last Refill
         last_refillevent = await self.logs.get_last_action("ADD_FUEL")
@@ -82,7 +85,7 @@ class InventoryService:
         
         # 3. Consumption in last 7 days
         days = 7
-        since = datetime.utcnow() - timedelta(days=days)
+        since = utcnow() - timedelta(days=days)
         refuel_events = await self.logs.get_actions_since("TAKE_FUEL", since)
         
         total_consumed = 0
@@ -115,9 +118,9 @@ class InventoryService:
         """
         Calculates total fuel consumption for the current week (Monday 00:00 to now).
         """
-        from datetime import datetime, timedelta
+        from datetime import timedelta
         
-        now = datetime.utcnow()
+        now = utcnow()
         # Find last Monday
         days_since_monday = now.weekday() # Mon=0, Sun=6
         last_monday = now - timedelta(days=days_since_monday)

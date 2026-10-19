@@ -58,7 +58,8 @@ async def _get_status_panel(generator_service: GeneratorService, with_keyboard: 
         text += f"   ⛽ <b>Залишок:</b> {g.fuel_level:.1f} л (бак {capacity:.1f} л)\n"
         
         if factor > 1.0:
-            text += f"   ❄️ <i>Поправка на мороз ({temp:.0f}°C): +{int((factor-1)*100)}% витрати</i>\n"
+            temp_text = f"{temp:.0f}°C" if temp is not None else "н/д"
+            text += f"   ❄️ <i>Поправка на мороз ({temp_text}): +{int((factor-1)*100)}% витрати</i>\n"
         
         if g.status == GenStatus.running:
              text += f"   ⏳ <b>Вистачить на:</b> ~{hours_left:.1f} год\n"

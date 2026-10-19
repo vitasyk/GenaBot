@@ -1,5 +1,10 @@
+import logging
+
 import aiohttp
+
 from bot.config import config
+
+logger = logging.getLogger(__name__)
 
 class WeatherService:
     BASE_URL = "https://api.openweathermap.org/data/2.5"
@@ -9,7 +14,8 @@ class WeatherService:
         self.lat = config.CITY_LAT
         self.lon = config.CITY_LON
 
-    async def get_current_temperature(self) -> float:
+    async def get_current_temperature(self) -> float | None:
+        """Current temperature, or None when the API is unavailable."""
         try:
             async with aiohttp.ClientSession() as session:
                 params = {
@@ -20,12 +26,14 @@ class WeatherService:
                 }
                 async with session.get(f"{self.BASE_URL}/weather", params=params, timeout=5) as resp:
                     if resp.status != 200:
-                        return 0.0
+                        logger.warning("Weather API /weather returned HTTP %s", resp.status)
+                        return None
                     data = await resp.json()
                     return data["main"]["temp"]
-        except Exception:
-            # logging.error(f"Weather API error: {e}")
-            return 0.0
+        except Exception as e:
+            # Only the type: aiohttp messages can contain the request URL with appid
+            logger.warning("Weather API /weather failed: %s", type(e).__name__)
+            return None
 
     async def get_weekly_forecast(self) -> list[dict]:
         """
@@ -49,6 +57,7 @@ class WeatherService:
                 # using /forecast endpoint (5 days/3 hour)
                 async with session.get(f"{self.BASE_URL}/forecast", params=params, timeout=5) as resp:
                     if resp.status != 200:
+                        logger.warning("Weather API /forecast returned HTTP %s", resp.status)
                         return []
                     data = await resp.json()
                     raw_list = data.get("list", [])
@@ -94,12 +103,14 @@ class WeatherService:
                         })
                         
                     return result
-        except Exception:
+        except Exception as e:
+            logger.warning("Weather API /forecast failed: %s", type(e).__name__)
             return []
 
-    def get_consumption_factor(self, temp: float) -> float:
-        """Returns multiplier for fuel consumption based on temperature."""
-        if temp < -10:
+    def get_consumption_factor(self, temp: float | None) -> float:
+        """Returns multiplier for fuel consumption based on temperature.
+        Unknown temperature (None) gets the worst case, so remaining fuel is never overestimated."""
+        if temp is None or temp < -10:
             return 1.2  # +20% in deep freeze
         elif temp < 0:
             return 1.1  # +10% below zero
@@ -127,7 +138,8 @@ class WeatherService:
             is_critical = min_temp < -10
             
             msg = "🌡️ <b>Прогноз погоди на сьогодні</b>\n\n"
-            msg += f"Зараз: <b>{current_temp:.1f}°C</b>\n"
+            current = f"{current_temp:.1f}°C" if current_temp is not None else "н/д"
+            msg += f"Зараз: <b>{current}</b>\n"
             msg += f"Діапазон: {min_temp:.1f}°C ... {max_temp:.1f}°C\n\n"
             
             if is_critical:
@@ -149,5 +161,6 @@ class WeatherService:
                  msg += f"└ ⛽ Витрата палива: +{increase}%\n"
             
             return msg
-        except Exception as e:
-            return f"⚠️ Error getting weather report: {e}"
+        except Exception:
+            logger.exception("Weather daily report failed")
+            return "⚠️ Weather data unavailable."

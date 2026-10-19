@@ -46,6 +46,7 @@ async def main():
     
     # Register routers
     from bot.handlers import common, inventory, generators, weather, admin, sessions, schedule
+    from bot.handlers import errors
     
     dp.include_router(admin.router) # Priority for admin commands like "Admin Panel"
     dp.include_router(schedule.router) # Schedule management
@@ -54,25 +55,20 @@ async def main():
     dp.include_router(sessions.router)
     dp.include_router(generators.router)
     dp.include_router(weather.router)
+    dp.include_router(errors.router)  # global error handler: catches exceptions from every router
     
     # Start Scheduler
-    from bot.scheduler import start_scheduler, restore_scheduler_settings
-    start_scheduler(bot)
-    await restore_scheduler_settings(redis_client)
-    
-    logging.info("Bot started and polling...")
-    
-    while True:
-        try:
-            await dp.start_polling(bot)
-        except asyncio.CancelledError:
-            logging.info("Bot stopped by user")
-            break
-        except Exception as e:
-            logging.error(f"Polling error: {e}. Restarting in 5 sec...")
-            await asyncio.sleep(5)
-    
-    await bot.session.close()
+    from bot.scheduler import restore_scheduler_settings, scheduler, start_scheduler
+    start_scheduler(bot, redis_client)
+    try:
+        await restore_scheduler_settings(redis_client)
+        logging.info("Bot started and polling...")
+        # aiogram retries network errors inside start_polling itself
+        await dp.start_polling(bot)
+    finally:
+        scheduler.shutdown(wait=False)
+        await bot.session.close()
+        await redis_client.aclose()
 
 if __name__ == "__main__":
     try:
