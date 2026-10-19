@@ -46,6 +46,7 @@ async def main():
     
     # Register routers
     from bot.handlers import common, inventory, generators, weather, admin, sessions, schedule
+    from bot.handlers import errors
     
     dp.include_router(admin.router) # Priority for admin commands like "Admin Panel"
     dp.include_router(schedule.router) # Schedule management
@@ -54,6 +55,7 @@ async def main():
     dp.include_router(sessions.router)
     dp.include_router(generators.router)
     dp.include_router(weather.router)
+    dp.include_router(errors.router)  # global error handler: catches exceptions from every router
     
     # Start Scheduler
     from bot.scheduler import start_scheduler, restore_scheduler_settings
