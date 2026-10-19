@@ -101,10 +101,11 @@ async def test_address_search_answers_queue_for_house(monkeypatch):
     assert "буд. 14 → черга 4.2" in reply and "1.1" not in reply
 
 
-async def test_long_queue_list_is_sent_as_file(monkeypatch):
+async def test_long_queue_list_is_paged_with_buttons(monkeypatch):
     from unittest.mock import AsyncMock, MagicMock
 
     from bot.handlers.schedule import addresses
+    from bot.keyboards.schedule_kb import QueuePageCb
 
     many = [AddressRow("Хмельницький", f"вул. Довга {i}", [str(n) for n in range(30)], "1.1") for i in range(50)]
     monkeypatch.setattr(addresses.addresses, "get_rows", AsyncMock(return_value=many))
@@ -112,4 +113,36 @@ async def test_long_queue_list_is_sent_as_file(monkeypatch):
 
     await addresses.queue_streets_list(msg, MagicMock(clear=AsyncMock()))
 
-    msg.answer_document.assert_awaited_once()
+    call = msg.answer.await_args_list[-1]
+    assert "стор. 1/" in call.args[0]
+    assert "Довга 0" in call.args[0]
+    buttons = [b.callback_data for b in call.kwargs["reply_markup"].inline_keyboard[0]]
+    assert QueuePageCb(queue="1.1", place="Хмельницький", page=1).pack() in buttons
+
+    # Next page edits the same message
+    callback = MagicMock(answer=AsyncMock(), message=MagicMock(edit_text=AsyncMock()))
+    await addresses.queue_streets_page(callback, QueuePageCb(queue="1.1", place="Хмельницький", page=1))
+    page2 = callback.message.edit_text.await_args.args[0]
+    assert "стор. 2/" in page2 and "Довга 0:" not in page2
+
+
+def test_paginate_splits_on_line_boundaries():
+    from bot.handlers.schedule.addresses import paginate
+
+    pages = paginate(["a" * 40] * 10, limit=100)
+    assert len(pages) == 5 and all(len(p) <= 100 for p in pages)
+    assert "".join(p.replace("\n", "") for p in pages) == "a" * 400
+
+
+async def test_queue_list_accepts_whole_queue_and_marks_subqueues(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from bot.handlers.schedule import addresses
+
+    monkeypatch.setattr(addresses.addresses, "get_rows", AsyncMock(return_value=ROWS))
+    msg = _message("4 Хмельницький")
+
+    await addresses.queue_streets_list(msg, MagicMock(clear=AsyncMock()))
+
+    reply = msg.answer.await_args_list[-1].args[0]
+    assert "вул. Зарічанська [4.2]: 2, 14" in reply

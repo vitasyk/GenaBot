@@ -91,9 +91,11 @@ def find_by_address(rows: list[AddressRow], query: str) -> list[AddressRow]:
 
 
 def streets_for_queue(rows: list[AddressRow], queue: str, settlement: str = "") -> list[AddressRow]:
-    """Rows of one queue, optionally only settlements whose name contains `settlement`."""
+    """Rows of one queue ("1" also matches its subqueues "1.1", "1.2"),
+    optionally only settlements whose name contains `settlement`."""
     needle = settlement.casefold()
-    return [r for r in rows if r.queue == queue and needle in r.settlement.casefold()]
+    return [r for r in rows
+            if (r.queue == queue or r.queue.startswith(f"{queue}.")) and needle in r.settlement.casefold()]
 
 
 class HoeAddressService:

@@ -1,10 +1,31 @@
 """Keyboards for schedule management"""
+from aiogram.filters.callback_data import CallbackData
 from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardMarkup,
 )
+
+
+class QueuePageCb(CallbackData, prefix="qst"):
+    """Page of the "streets of a queue" list: the query is repeated so pages need no stored state."""
+    queue: str
+    place: str
+    page: int
+
+
+def get_queue_pages_kb(queue: str, place: str, page: int, total: int) -> InlineKeyboardMarkup | None:
+    """◀️ 2/5 ▶️ under a paged list; None when everything fits on one page."""
+    if total <= 1:
+        return None
+    buttons = []
+    if page > 0:
+        buttons.append(InlineKeyboardButton(text="◀️", callback_data=QueuePageCb(queue=queue, place=place, page=page - 1).pack()))
+    buttons.append(InlineKeyboardButton(text=f"{page + 1}/{total}", callback_data="qst_noop"))
+    if page < total - 1:
+        buttons.append(InlineKeyboardButton(text="▶️", callback_data=QueuePageCb(queue=queue, place=place, page=page + 1).pack()))
+    return InlineKeyboardMarkup(inline_keyboard=[buttons])
 
 
 def get_hoe_selection_kb() -> InlineKeyboardMarkup:
