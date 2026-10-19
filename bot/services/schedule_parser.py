@@ -23,29 +23,33 @@ class ScheduleParser:
     def __init__(self):
         os.makedirs(self.CACHE_DIR, exist_ok=True)
 
-    def _get_cache_path(self, suffix: str) -> str:
-        """Get path for a specific cache slot (today/tomorrow)"""
-        return f"{self.CACHE_DIR}/schedule_{suffix}.png"
+    def _get_cache_path(self, day: date) -> str:
+        """Cache file of the schedule for `day`: an image is never shown for another date.
 
-    def _save_to_cache(self, image_bytes: bytes, suffix: str = "today"):
-        """Save image bytes to local cache slot"""
+        shortcut: one ~300 KB file per day, never pruned; fine while data/ is not a volume
+        (each deploy starts empty), prune old files if data/cache ever becomes persistent.
+        """
+        return f"{self.CACHE_DIR}/schedule_{day.isoformat()}.png"
+
+    def _save_to_cache(self, image_bytes: bytes, day: date):
+        """Save the schedule image for `day` to the local cache"""
         try:
-            path = self._get_cache_path(suffix)
+            path = self._get_cache_path(day)
             with open(path, "wb") as f:
                 f.write(image_bytes)
-            logger.info(f"Schedule image saved to cache ({suffix}): {path}")
+            logger.info(f"Schedule image saved to cache ({day}): {path}")
         except OSError:
             logger.exception("Failed to save schedule to cache")
 
-    def get_cached_schedule(self, suffix: str = "today") -> bytes | None:
-        """Retrieve cached schedule from specific slot"""
-        path = self._get_cache_path(suffix)
+    def get_cached_schedule(self, day: date) -> bytes | None:
+        """Last downloaded schedule image for `day`, if any"""
+        path = self._get_cache_path(day)
         if os.path.exists(path):
             try:
                 with open(path, "rb") as f:
                     return f.read()
             except OSError:
-                logger.exception(f"Failed to read schedule from cache ({suffix})")
+                logger.exception(f"Failed to read schedule from cache ({day})")
         return None
 
     async def get_schedules_data(self) -> list[tuple[datetime, bytes]]:
@@ -75,7 +79,7 @@ class ScheduleParser:
                     async with session.get(f"{HOE_BASE_URL}{url}") as img_resp:
                         if img_resp.status == 200:
                             found[day] = await img_resp.read()
-                            self._save_to_cache(found[day], "today" if day == today else "tomorrow")
+                            self._save_to_cache(found[day], day)
                             logger.info(f"Fetched schedule for {day}: {url}")
 
                 for img_tag in re.findall(r'<img[^>]+>', html):

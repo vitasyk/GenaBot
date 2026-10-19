@@ -164,3 +164,6 @@ credentials/
 # Claude Code agent worktrees and personal settings
 .claude/worktrees/
 .claude/settings.local.json
+
+# Downloaded HOE schedule images (runtime cache)
+data/cache/

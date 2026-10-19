@@ -1,7 +1,7 @@
 import asyncio
 import html
 import logging
-from datetime import timedelta
+from datetime import date, timedelta
 from io import BytesIO
 
 from aiogram import F, Router
@@ -53,15 +53,15 @@ async def start_photo_recognition(message: Message, state: FSMContext, user_repo
         parse_mode="HTML"
     )
 
-async def _send_cached_schedule(callback: CallbackQuery, suffix: str, label: str, reason: str) -> None:
+async def _send_cached_schedule(callback: CallbackQuery, target_date: date, label: str, reason: str) -> None:
     """HOE is down: show the last downloaded image for this day, if any."""
-    cached_img = parser.get_cached_schedule(suffix=suffix)
+    cached_img = parser.get_cached_schedule(target_date)
     if not cached_img:
         await callback.message.edit_text(f"{reason}\n\nСпробуйте пізніше або введіть графік вручну.", parse_mode="HTML")
         return
     await callback.message.delete()
     await callback.message.answer_photo(
-        photo=BufferedInputFile(cached_img, filename=f"cached_schedule_{suffix}.png"),
+        photo=BufferedInputFile(cached_img, filename=f"cached_schedule_{target_date.isoformat()}.png"),
         caption=f"{reason}\n\nПоказую <b>останній завантажений</b> графік на {label}.\n"
                 "<i>Він може бути неактуальним!</i>",
         parse_mode="HTML"
@@ -74,7 +74,6 @@ async def process_hoe_download_callback(callback: CallbackQuery, state: FSMConte
     is_today = callback.data == "hoe_today"
     target_date = today if is_today else today + timedelta(days=1)
     label = "сьогодні" if is_today else "завтра"
-    suffix = "today" if is_today else "tomorrow"
 
     await callback.answer()  # Answer immediately to prevent Telegram timeout
     await callback.message.edit_text(f"🔍 <b>Шукаю графік на {label}...</b>", parse_mode="HTML")
@@ -83,13 +82,13 @@ async def process_hoe_download_callback(callback: CallbackQuery, state: FSMConte
         results = await asyncio.wait_for(parser.get_schedules_data(), timeout=30.0)
     except TimeoutError:
         logger.error("HOE download timed out (30s)")
-        await _send_cached_schedule(callback, suffix, label, "⚠️ <b>Сайт HOE недоступний (таймаут)</b>")
+        await _send_cached_schedule(callback, target_date, label, "⚠️ <b>Сайт HOE недоступний (таймаут)</b>")
         return
 
     img_bytes = next((b for d, b in results if d.date() == target_date), None)
     if not img_bytes:
         if not results:
-            await _send_cached_schedule(callback, suffix, label, "❌ <b>Не вдалося завантажити графік з HOE</b>")
+            await _send_cached_schedule(callback, target_date, label, "❌ <b>Не вдалося завантажити графік з HOE</b>")
             return
         await callback.message.edit_text(
             f"⚠️ <b>Графіку на {label} ({target_date.strftime('%d.%m')}) ще немає</b>\n\n"
