@@ -195,13 +195,15 @@ class GeneratorService:
         # Log details
         details = f"Stopped {gen.name}. Runtime: {runtime_hours:.2f}h. Consumed: {consumed:.2f}L."
         if factor > 1.0:
-            details += f" (Weather factor: x{factor:.1f}, Temp: {temp:.1f}C)"
-            
+            temp_log = f"{temp:.1f}C" if temp is not None else "unknown"
+            details += f" (Weather factor: x{factor:.1f}, Temp: {temp_log})"
+
         await self.logs.log_action(user_id, "STOP_GEN", details)
 
         hours, minutes = divmod(int(runtime_hours * 60), 60)
         duration = f"{hours} год {minutes} хв" if hours else f"{minutes} хв"
-        frost = f" (мороз {temp:.0f}°C: +{(factor - 1) * 100:.0f}%)" if factor > 1.0 else ""
+        temp_text = f"мороз {temp:.0f}°C" if temp is not None else "температура н/д"
+        frost = f" ({temp_text}: +{(factor - 1) * 100:.0f}%)" if factor > 1.0 else ""
         return (f"🛑 <b>{html.escape(gen.name)} зупинено</b>\n"
                 f"⏱ Працював: {duration}\n"
                 f"⛽ Витрачено: ≈{consumed:.1f} л{frost}\n"
@@ -245,7 +247,9 @@ class GeneratorService:
             
         downtime_hours = (datetime.utcnow() - gen.last_stop_at).total_seconds() / 3600.0
         temp = await self.weather.get_current_temperature()
-        
+        if temp is None:
+            return None
+
         # Logic:
         # -15 and below -> 6h
         # -10 to -14 -> 10h
@@ -277,7 +281,7 @@ class GeneratorService:
                 # Threshold is already calculated in get_warming_recommendation indirectly, 
                 # but we can deduce it from the temperature again for expiry duration.
                 temp = await self.weather.get_current_temperature()
-                threshold_h = 10.0 if temp > -15 else 6.0
+                threshold_h = 6.0 if temp is not None and temp <= -15 else 10.0
                 
                 notify_key = f"notify:warming:{g.name}"
                 if not await self.redis.get(notify_key):
