@@ -146,3 +146,19 @@ async def test_queue_list_accepts_whole_queue_and_marks_subqueues(monkeypatch):
 
     reply = msg.answer.await_args_list[-1].args[0]
     assert "вул. Зарічанська [4.2]: 2, 14" in reply
+
+
+async def test_nothing_found_keeps_waiting_for_another_try(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from bot.handlers.schedule import addresses
+
+    monkeypatch.setattr(addresses.addresses, "get_rows", AsyncMock(return_value=ROWS))
+
+    state = MagicMock(clear=AsyncMock())
+    await addresses.queue_streets_list(_message("1 \\"), state)
+    await addresses.address_search(_message("Неіснуюча 5"), state)
+    state.clear.assert_not_awaited()
+
+    await addresses.queue_streets_list(_message("1 Хмельницький"), state)
+    state.clear.assert_awaited_once()

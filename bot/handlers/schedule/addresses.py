@@ -30,6 +30,7 @@ QUEUE_INPUT = re.compile(r"\d{1,2}(\.\d)?")
 MAX_ADDRESS_RESULTS = 15
 MAX_MESSAGE_CHARS = 3500  # Telegram limit is 4096; longer queue lists are paged, address results go as a file
 MAX_PLACE_BYTES = 40  # callback data is limited to 64 bytes
+TRY_AGAIN = "Перевірте написання і надішліть ще раз (можна частину назви) або натисніть «🔙 Головне меню»."
 
 
 async def _rows_or_none(message: Message) -> list[AddressRow] | None:
@@ -64,14 +65,14 @@ async def address_start(message: Message, state: FSMContext):
 
 @router.message(ScheduleStates.waiting_for_address, F.text, ~F.text.in_(MENU_BUTTONS))  # menu buttons keep working
 async def address_search(message: Message, state: FSMContext):
-    await state.clear()
     rows = await _rows_or_none(message)
     if rows is None:
         return
     found = find_by_address(rows, message.text)
-    if not found:
-        await message.answer("🤷 Нічого не знайдено. Перевірте назву вулиці або введіть без номера будинку.")
+    if not found:  # stay in input mode: the next message is another try
+        await message.answer(f"🤷 Нічого не знайдено. {TRY_AGAIN}")
         return
+    await state.clear()
 
     _, house = split_house(message.text)
     lines = []
@@ -107,14 +108,15 @@ async def queue_streets_list(message: Message, state: FSMContext):
     if len(place.encode()) > MAX_PLACE_BYTES:
         await message.answer("⚠️ Задовга назва населеного пункту, введіть коротше (можна частину назви).")
         return
-    await state.clear()
     rows = await _rows_or_none(message)
     if rows is None:
         return
     pages = _queue_pages(rows, queue, place)
-    if not pages:
-        await message.answer(f"🤷 Для черги {queue} нічого не знайдено.")
+    if not pages:  # stay in input mode: the next message is another try
+        where = f" у «{place}»" if place else ""
+        await message.answer(f"🤷 Для черги {queue}{where} нічого не знайдено. {TRY_AGAIN}")
         return
+    await state.clear()
     await message.answer(html.escape(pages[0]), parse_mode="HTML",
                          reply_markup=get_queue_pages_kb(queue, place, 0, len(pages)))
 
