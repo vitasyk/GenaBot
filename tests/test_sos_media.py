@@ -7,7 +7,8 @@ from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InputMediaDocument, InputMediaPhoto
 
-from bot.handlers import admin, common
+from bot.handlers import common
+from bot.handlers.admin import generators as admin_generators
 from bot.services.generator import GeneratorService
 from bot.states import AdminStates
 
@@ -45,9 +46,9 @@ async def test_photo_and_pdf_are_attached_largest_photo_size(service):
     state = await media_state()
     small, big = SimpleNamespace(file_id="small"), SimpleNamespace(file_id="big")
 
-    await admin.admin_generator_media_input(message(photo=[small, big]), state, svc)
+    await admin_generators.admin_generator_media_input(message(photo=[small, big]), state, svc)
     pdf = SimpleNamespace(file_id="manual", mime_type="application/pdf")
-    await admin.admin_generator_media_input(message(document=pdf), state, svc)
+    await admin_generators.admin_generator_media_input(message(document=pdf), state, svc)
 
     assert gen.instructions_media == [{"type": "photo", "file_id": "big"}, {"type": "document", "file_id": "manual"}]
     assert await state.get_state() == AdminStates.waiting_for_gen_media.state  # admin can keep adding
@@ -58,18 +59,18 @@ async def test_other_files_and_text_are_rejected(service):
     state = await media_state()
     zip_file = SimpleNamespace(file_id="z", mime_type="application/zip")
 
-    await admin.admin_generator_media_input(message(document=zip_file), state, svc)
-    await admin.admin_generator_media_input(message(text="привіт"), state, svc)
+    await admin_generators.admin_generator_media_input(message(document=zip_file), state, svc)
+    await admin_generators.admin_generator_media_input(message(text="привіт"), state, svc)
 
     svc.add_instruction_media.assert_not_called()
 
 
 async def test_limit_of_ten_attachments(service):
     svc, gen = service
-    gen.instructions_media = [{"type": "photo", "file_id": str(i)} for i in range(admin.SOS_MEDIA_MAX)]
+    gen.instructions_media = [{"type": "photo", "file_id": str(i)} for i in range(admin_generators.SOS_MEDIA_MAX)]
     msg = message(photo=[SimpleNamespace(file_id="one-more")])
 
-    await admin.admin_generator_media_input(msg, await media_state(), svc)
+    await admin_generators.admin_generator_media_input(msg, await media_state(), svc)
 
     svc.add_instruction_media.assert_not_called()
     assert "більше не можна" in msg.answer.call_args.args[0]
@@ -78,7 +79,7 @@ async def test_limit_of_ten_attachments(service):
 async def test_menu_button_cancels_media_step(service):
     svc, _ = service
     state = await media_state()
-    await admin.admin_generator_media_input(message(text="⚡ Статус"), state, svc)
+    await admin_generators.admin_generator_media_input(message(text="⚡ Статус"), state, svc)
     assert await state.get_state() is None
 
 

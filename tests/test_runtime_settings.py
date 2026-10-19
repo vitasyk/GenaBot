@@ -3,7 +3,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from bot.config import config
-from bot.handlers.admin import slack_threshold_input, toggle_access_callback, toggle_notify_callback
+from bot.handlers.admin.panel import toggle_access_callback, toggle_notify_callback
+from bot.handlers.admin.slack import slack_threshold_input
 from bot.scheduler import restore_runtime_settings
 
 
