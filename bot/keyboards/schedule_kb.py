@@ -15,17 +15,26 @@ class QueuePageCb(CallbackData, prefix="qst"):
     page: int
 
 
-def get_queue_pages_kb(queue: str, place: str, page: int, total: int) -> InlineKeyboardMarkup | None:
-    """◀️ 2/5 ▶️ under a paged list; None when everything fits on one page."""
-    if total <= 1:
-        return None
-    buttons = []
-    if page > 0:
-        buttons.append(InlineKeyboardButton(text="◀️", callback_data=QueuePageCb(queue=queue, place=place, page=page - 1).pack()))
-    buttons.append(InlineKeyboardButton(text=f"{page + 1}/{total}", callback_data="qst_noop"))
-    if page < total - 1:
-        buttons.append(InlineKeyboardButton(text="▶️", callback_data=QueuePageCb(queue=queue, place=place, page=page + 1).pack()))
-    return InlineKeyboardMarkup(inline_keyboard=[buttons])
+LOOKUP_AGAIN_TEXT = {"queue": "🔄 Інша черга", "address": "🔄 Інша адреса"}
+
+
+def get_lookup_kb(again: str | None = None, nav: list[InlineKeyboardButton] | None = None) -> InlineKeyboardMarkup:
+    """Address/queue lookup: optional page row, then "🔄 Інша ..." (again: "queue" | "address") and "❌ Закрити"."""
+    actions = [InlineKeyboardButton(text=LOOKUP_AGAIN_TEXT[again], callback_data=f"lookup:{again}")] if again else []
+    actions.append(InlineKeyboardButton(text="❌ Закрити", callback_data="lookup:close"))
+    return InlineKeyboardMarkup(inline_keyboard=[nav, actions] if nav else [actions])
+
+
+def get_queue_pages_kb(queue: str, place: str, page: int, total: int) -> InlineKeyboardMarkup:
+    """◀️ 2/5 ▶️ under a paged list (no page row when it fits on one page) + lookup actions."""
+    nav = []
+    if total > 1:
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="◀️", callback_data=QueuePageCb(queue=queue, place=place, page=page - 1).pack()))
+        nav.append(InlineKeyboardButton(text=f"{page + 1}/{total}", callback_data="qst_noop"))
+        if page < total - 1:
+            nav.append(InlineKeyboardButton(text="▶️", callback_data=QueuePageCb(queue=queue, place=place, page=page + 1).pack()))
+    return get_lookup_kb("queue", nav)
 
 
 def get_hoe_selection_kb() -> InlineKeyboardMarkup:

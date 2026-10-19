@@ -162,3 +162,47 @@ async def test_nothing_found_keeps_waiting_for_another_try(monkeypatch):
 
     await addresses.queue_streets_list(_message("1 Хмельницький"), state)
     state.clear.assert_awaited_once()
+
+
+def _callback(data: str):
+    from unittest.mock import AsyncMock, MagicMock
+    cb = MagicMock(data=data, answer=AsyncMock())
+    cb.message = MagicMock(delete=AsyncMock(), answer=AsyncMock(), edit_text=AsyncMock())
+    return cb
+
+
+def _buttons(markup) -> list[str]:
+    return [b.callback_data for row in markup.inline_keyboard for b in row]
+
+
+async def test_results_have_again_and_close_buttons(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from bot.handlers.schedule import addresses
+
+    monkeypatch.setattr(addresses.addresses, "get_rows", AsyncMock(return_value=ROWS))
+
+    msg = _message("Зарічанська 14")
+    await addresses.address_search(msg, MagicMock(clear=AsyncMock()))
+    assert {"lookup:address", "lookup:close"} <= set(_buttons(msg.answer.await_args_list[-1].kwargs["reply_markup"]))
+
+    msg = _message("1.1")
+    await addresses.queue_streets_list(msg, MagicMock(clear=AsyncMock()))
+    assert {"lookup:queue", "lookup:close"} <= set(_buttons(msg.answer.await_args_list[-1].kwargs["reply_markup"]))
+
+
+async def test_again_button_waits_for_new_input_and_close_exits(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from bot.handlers.schedule import addresses
+    from bot.states import ScheduleStates
+
+    state = MagicMock(set_state=AsyncMock(), clear=AsyncMock(),
+                      get_state=AsyncMock(return_value=ScheduleStates.waiting_for_queue_streets.state))
+    await addresses.lookup_again(_callback("lookup:queue"), state)
+    state.set_state.assert_awaited_once_with(ScheduleStates.waiting_for_queue_streets)
+
+    cb = _callback("lookup:close")
+    await addresses.lookup_close(cb, state)
+    state.clear.assert_awaited_once()
+    cb.message.delete.assert_awaited_once()

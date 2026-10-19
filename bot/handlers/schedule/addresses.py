@@ -4,12 +4,13 @@ import logging
 import re
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
 from bot.config import config
 from bot.keyboards.main_kb import MENU_BUTTONS
-from bot.keyboards.schedule_kb import QueuePageCb, get_queue_pages_kb
+from bot.keyboards.schedule_kb import QueuePageCb, get_lookup_kb, get_queue_pages_kb
 from bot.services.hoe_addresses import (
     AddressRow,
     HoeAddressError,
@@ -30,7 +31,8 @@ QUEUE_INPUT = re.compile(r"\d{1,2}(\.\d)?")
 MAX_ADDRESS_RESULTS = 15
 MAX_MESSAGE_CHARS = 3500  # Telegram limit is 4096; longer queue lists are paged, address results go as a file
 MAX_PLACE_BYTES = 40  # callback data is limited to 64 bytes
-TRY_AGAIN = "Перевірте написання і надішліть ще раз (можна частину назви) або натисніть «🔙 Головне меню»."
+TRY_AGAIN = "Перевірте написання і надішліть ще раз (можна частину назви) або натисніть «❌ Закрити»."
+LOOKUP_STATES = {ScheduleStates.waiting_for_address.state, ScheduleStates.waiting_for_queue_streets.state}
 
 
 async def _rows_or_none(message: Message) -> list[AddressRow] | None:
@@ -47,10 +49,12 @@ async def _rows_or_none(message: Message) -> list[AddressRow] | None:
 
 async def _send_long(message: Message, text: str, filename: str, caption: str) -> None:
     """Plain text as a message, or as a .txt file when it doesn't fit (HOE data is escaped)."""
+    kb = get_lookup_kb("address")
     if len(text) <= MAX_MESSAGE_CHARS:
-        await message.answer(html.escape(text), parse_mode="HTML")
+        await message.answer(html.escape(text), parse_mode="HTML", reply_markup=kb)
     else:
-        await message.answer_document(BufferedInputFile(text.encode("utf-8"), filename=filename), caption=caption)
+        await message.answer_document(BufferedInputFile(text.encode("utf-8"), filename=filename),
+                                      caption=caption, reply_markup=kb)
 
 
 @router.message(F.text == "🏠 Черга за адресою")
@@ -60,7 +64,28 @@ async def address_start(message: Message, state: FSMContext):
         "🏠 Введіть вулицю і номер будинку, за потреби з населеним пунктом.\n"
         "Наприклад: <code>Бандери 22</code> або <code>Антонівці Садова 13а</code>",
         parse_mode="HTML",
+        reply_markup=get_lookup_kb(),
     )
+
+
+@router.callback_query(F.data.in_({"lookup:address", "lookup:queue"}))
+async def lookup_again(callback: CallbackQuery, state: FSMContext):
+    """"🔄 Інша адреса / черга": ask for the next query right away."""
+    start = address_start if callback.data == "lookup:address" else queue_streets_start
+    await start(callback.message, state)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "lookup:close")
+async def lookup_close(callback: CallbackQuery, state: FSMContext):
+    """"❌ Закрити": leave input mode (only ours) and remove the message."""
+    if await state.get_state() in LOOKUP_STATES:
+        await state.clear()
+    try:
+        await callback.message.delete()
+    except (TelegramAPIError, AttributeError):  # older than 48 h or InaccessibleMessage
+        logger.debug("Lookup close: message not deleted", exc_info=True)
+    await callback.answer()
 
 
 @router.message(ScheduleStates.waiting_for_address, F.text, ~F.text.in_(MENU_BUTTONS))  # menu buttons keep working
@@ -70,7 +95,7 @@ async def address_search(message: Message, state: FSMContext):
         return
     found = find_by_address(rows, message.text)
     if not found:  # stay in input mode: the next message is another try
-        await message.answer(f"🤷 Нічого не знайдено. {TRY_AGAIN}")
+        await message.answer(f"🤷 Нічого не знайдено. {TRY_AGAIN}", reply_markup=get_lookup_kb())
         return
     await state.clear()
 
@@ -93,6 +118,7 @@ async def queue_streets_start(message: Message, state: FSMContext):
         "📋 Введіть чергу (<code>1</code>) або підчергу (<code>1.1</code>) і, за потреби, населений пункт.\n"
         f"Наприклад: <code>{html.escape(config.QUEUE_NUMBER)} Хмельницький</code>",
         parse_mode="HTML",
+        reply_markup=get_lookup_kb(),
     )
 
 
@@ -102,11 +128,12 @@ async def queue_streets_list(message: Message, state: FSMContext):
     if not QUEUE_INPUT.fullmatch(queue):
         await message.answer("⚠️ Спочатку черга або підчерга — наприклад <code>1 Хмельницький</code> "
                              "чи <code>1.1 Хмельницький</code>.",
-                             parse_mode="HTML")
+                             parse_mode="HTML", reply_markup=get_lookup_kb())
         return
     place = settlement.strip().replace(":", " ")  # ":" separates callback data fields
     if len(place.encode()) > MAX_PLACE_BYTES:
-        await message.answer("⚠️ Задовга назва населеного пункту, введіть коротше (можна частину назви).")
+        await message.answer("⚠️ Задовга назва населеного пункту, введіть коротше (можна частину назви).",
+                             reply_markup=get_lookup_kb())
         return
     rows = await _rows_or_none(message)
     if rows is None:
@@ -114,7 +141,8 @@ async def queue_streets_list(message: Message, state: FSMContext):
     pages = _queue_pages(rows, queue, place)
     if not pages:  # stay in input mode: the next message is another try
         where = f" у «{place}»" if place else ""
-        await message.answer(f"🤷 Для черги {queue}{where} нічого не знайдено. {TRY_AGAIN}")
+        await message.answer(f"🤷 Для черги {queue}{where} нічого не знайдено. {TRY_AGAIN}",
+                             reply_markup=get_lookup_kb())
         return
     await state.clear()
     await message.answer(html.escape(pages[0]), parse_mode="HTML",
