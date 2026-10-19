@@ -11,6 +11,8 @@ from bot.keyboards.schedule_kb import get_queue_kb, get_schedule_menu_kb
 from bot.scheduler import save_runtime_setting
 from bot.states import ScheduleStates
 
+logger = logging.getLogger(__name__)
+
 router = Router()
 
 # HOE has 6 queues x 2 subqueues; any other one can be typed in
@@ -21,7 +23,7 @@ QUEUE_PATTERN = re.compile(r"\d{1,2}\.\d")
 async def _save_queue(state: FSMContext, queue: str) -> None:
     config.QUEUE_NUMBER = queue
     await save_runtime_setting(state.storage.redis, "QUEUE_NUMBER", queue)
-    logging.info(f"Queue changed to {queue}")
+    logger.info(f"Queue changed to {queue}")
 
 @router.message(F.text == "🔢 Черга")
 async def queue_menu(message: Message):

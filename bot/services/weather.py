@@ -30,7 +30,7 @@ class WeatherService:
                         return None
                     data = await resp.json()
                     return data["main"]["temp"]
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - any network/JSON failure means "no data"; no traceback, it can hold the appid URL
             # Only the type: aiohttp messages can contain the request URL with appid
             logger.warning("Weather API /weather failed: %s", type(e).__name__)
             return None
@@ -103,7 +103,7 @@ class WeatherService:
                         })
                         
                     return result
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - any network/JSON failure means "no data"; no traceback, it can hold the appid URL
             logger.warning("Weather API /forecast failed: %s", type(e).__name__)
             return []
 

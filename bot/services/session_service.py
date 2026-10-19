@@ -25,6 +25,8 @@ from bot.services.notifier import NotifierService
 from bot.services.weather import WeatherService
 from bot.utils.clock import now_local
 
+logger = logging.getLogger(__name__)
+
 # Outage warning goes out this long after the scheduled start, so power that is cut a bit late still counts
 OUTAGE_WARNING_DELAY = timedelta(minutes=5)
 # A bot restart later than this into the outage doesn't send a stale warning
@@ -70,7 +72,7 @@ class SessionService:
                 dt = datetime.combine(entry.date, time(hour, 0))
                 timeline.append(dt)
         
-        return sorted(list(set(timeline)))  # Remove duplicates and sort
+        return sorted(set(timeline))  # Remove duplicates and sort
 
     async def check_power_outage(self) -> RefuelSession | None:
         """
@@ -220,9 +222,9 @@ class SessionService:
         try:
             worker_tuples = await self._get_workers_from_sheets(lookup_dt)
         except Exception:
-            logging.exception(f"Failed to get workers from Google Sheets for {lookup_dt}")
+            logger.exception(f"Failed to get workers from Google Sheets for {lookup_dt}")
             return [], []
-        logging.info(f"Sheets returned workers for {lookup_dt}: {[w[0] for w in worker_tuples]}")
+        logger.info(f"Sheets returned workers for {lookup_dt}: {[w[0] for w in worker_tuples]}")
 
         worker_ids, worker_tags = [], []
         for name, _phone in worker_tuples:
@@ -253,7 +255,7 @@ class SessionService:
             if user:
                 return user
 
-        logging.warning(f"Could not find ID for worker: '{name}' (Cleaned: '{clean_name}')")
+        logger.warning(f"Could not find ID for worker: '{name}' (Cleaned: '{clean_name}')")
         return None
 
     async def create_manual_session(self, hours: int = 2) -> RefuelSession:

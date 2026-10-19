@@ -71,7 +71,7 @@ class SessionRepository:
                                gen_name: str,
                                liters: float,
                                cans: float,
-                               notes: str = None) -> RefuelSession | None:
+                               notes: str | None = None) -> RefuelSession | None:
         """Completes an open session. Returns None if it was already completed or cancelled,
         so a second worker can't record (and deduct) the same refuel twice."""
         stmt = update(RefuelSession).where(

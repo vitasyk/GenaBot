@@ -8,6 +8,8 @@ from aiogram.types import CallbackQuery, Message, TelegramObject
 from bot.database.models import UserRole
 from bot.database.repositories.user import UserRepository, resolve_role
 
+logger = logging.getLogger(__name__)
+
 ACCESS_DENIED_TEXT = "⛔ Доступ заборонено. Зверніться до адміністратора."
 
 # These commands register/refresh the user, so they must reach the handler.
@@ -44,12 +46,12 @@ class AccessMiddleware(BaseMiddleware):
             role = resolve_role(user.id)
             if user.role != role:
                 # Config changed since /start (revoked or granted): DbSessionMiddleware commits it
-                logging.info("Access role synced: user_id=%s %s -> %s", user.id, user.role, role)
+                logger.info("Access role synced: user_id=%s %s -> %s", user.id, user.role, role)
                 user.role = role
         if user and user.role in ALLOWED_ROLES:
             return await handler(event, data)
 
-        logging.warning("Access denied: user_id=%s role=%s", tg_user.id if tg_user else None, user.role if user else None)
+        logger.warning("Access denied: user_id=%s role=%s", tg_user.id if tg_user else None, user.role if user else None)
         if isinstance(event, CallbackQuery):
             await event.answer(ACCESS_DENIED_TEXT, show_alert=True)
         elif isinstance(event, Message):

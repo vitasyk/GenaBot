@@ -2,6 +2,7 @@ import logging
 from datetime import UTC
 
 from aiogram import F, Router, types
+from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
 
@@ -16,17 +17,20 @@ from bot.keyboards.main_kb import MENU_BUTTONS
 from bot.services.generator import GeneratorService
 from bot.states import GenStates
 
+logger = logging.getLogger(__name__)
+
 router = Router()
 
 async def _get_status_panel(generator_service: GeneratorService, with_keyboard: bool = True, exclude_correction: bool = False):
-    logging.info("Status panel requested - v2.0")
+    logger.info("Status panel requested - v2.0")
     gens = await generator_service.get_status()
     
     # Weather info
     try:
         temp = await generator_service.weather.get_current_temperature()
         factor = generator_service.weather.get_consumption_factor(temp)
-    except:
+    except Exception:
+        logger.warning("Status panel: weather lookup failed", exc_info=True)
         temp = 0
         factor = 1.0
 
@@ -79,9 +83,9 @@ async def _get_status_panel(generator_service: GeneratorService, with_keyboard: 
                       utc_time = g.current_run_start.replace(tzinfo=UTC)
                       local_time = utc_time.astimezone(tz)
                       time_str = local_time.strftime('%H:%M')
-                  except Exception as e:
+                  except Exception:
                       # Fallback
-                      logging.error(f"Timezone error: {e}")
+                      logger.exception("Timezone error")
                       time_str = g.current_run_start.strftime('%H:%M UTC')
 
                   text += f"   🕒 <b>Запущено о:</b> {time_str}\n"
@@ -124,8 +128,8 @@ async def toggle_notify_handler(callback: types.CallbackQuery, generator_service
 async def status_close_handler(callback: types.CallbackQuery):
     try:
         await callback.message.delete()
-    except Exception:
-        pass  # Message already deleted or not found
+    except (TelegramAPIError, AttributeError):  # already deleted, too old, or InaccessibleMessage
+        logger.debug("Status close: message not deleted", exc_info=True)
     await callback.answer()
 
 def _get_correction_keyboard():

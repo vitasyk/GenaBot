@@ -6,6 +6,8 @@ from aiogram.fsm.storage.redis import RedisStorage
 
 from bot.config import config
 
+logger = logging.getLogger(__name__)
+
 
 async def main():
     logging.basicConfig(level=logging.INFO)
@@ -72,7 +74,7 @@ async def main():
     start_scheduler(bot, redis_client)
     try:
         await restore_scheduler_settings(redis_client)
-        logging.info("Bot started and polling...")
+        logger.info("Bot started and polling...")
         # aiogram retries network errors inside start_polling itself
         await dp.start_polling(bot)
     finally:

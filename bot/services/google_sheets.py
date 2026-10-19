@@ -8,6 +8,8 @@ from google.oauth2.service_account import Credentials
 from bot.config import config
 from bot.utils.clock import now_local
 
+logger = logging.getLogger(__name__)
+
 
 class GoogleSheetsService:
     """Service for reading worker shift schedule from Google Sheets (calendar format)"""
@@ -23,7 +25,7 @@ class GoogleSheetsService:
             )
             self.client = gspread.authorize(creds)
         except Exception as e:
-            logging.warning(f"Google Sheets init failed: {e}")
+            logger.warning(f"Google Sheets init failed: {e}", exc_info=True)
 
     def _get_worksheet(self, target_date: date) -> gspread.Worksheet:
         """Get or open worksheet for specific date"""
@@ -43,15 +45,15 @@ class GoogleSheetsService:
             return self.worksheet
             
         try:
-            logging.info(f"Opening worksheet: {worksheet_name}")
+            logger.info(f"Opening worksheet: {worksheet_name}")
             self.worksheet = self.spreadsheet.worksheet(worksheet_name)
             return self.worksheet
         except gspread.WorksheetNotFound:
-            logging.error(f"Worksheet not found: {worksheet_name}")
+            logger.error(f"Worksheet not found: {worksheet_name}")
             # Try to find any worksheet if the current month is missing as fallback
             if not self.worksheet:
                 self.worksheet = self.spreadsheet.get_worksheet(0)
-                logging.warning(f"Using first worksheet as fallback: {self.worksheet.title}")
+                logger.warning(f"Using first worksheet as fallback: {self.worksheet.title}")
             raise
     
     def _find_date_column(self, target_date: date, all_values: list[list[str]]) -> int | None:
@@ -73,22 +75,22 @@ class GoogleSheetsService:
                 # Try multiple patterns:
                 # 1. Exact match: "6"
                 if cell_value == str(day_num):
-                    logging.info(f"Found date column {col_idx} for {target_date} (exact match: '{cell_value}')")
+                    logger.info(f"Found date column {col_idx} for {target_date} (exact match: '{cell_value}')")
                     return col_idx
                 
                 # 2. Day + number: "Чт 6", "Пн 3"
                 if ' ' in cell_value:
                     parts = cell_value.split()
                     if len(parts) >= 2 and parts[-1].strip() == str(day_num):
-                        logging.info(f"Found date column {col_idx} for {target_date} (pattern match: '{cell_value}')")
+                        logger.info(f"Found date column {col_idx} for {target_date} (pattern match: '{cell_value}')")
                         return col_idx
                 
                 # 3. Zero-padded: "06"
                 if cell_value == f"{day_num:02d}":
-                    logging.info(f"Found date column {col_idx} for {target_date} (zero-padded: '{cell_value}')")
+                    logger.info(f"Found date column {col_idx} for {target_date} (zero-padded: '{cell_value}')")
                     return col_idx
         
-        logging.warning(f"Could not find column for date {target_date}, using fallback")
+        logger.warning(f"Could not find column for date {target_date}, using fallback")
         # Fallback: estimate based on day of month
         # Assuming columns start from column 2 (after name and phone)
         # and cycle through weeks
@@ -105,7 +107,7 @@ class GoogleSheetsService:
         # Find column for this date
         date_col = self._find_date_column(target_date, all_values)
         if date_col is None:
-            logging.warning(f"Could not find column for date {target_date}")
+            logger.warning(f"Could not find column for date {target_date}")
             return []
         
         workers = []
@@ -142,7 +144,7 @@ class GoogleSheetsService:
         
         return workers
     
-    def get_workers_for_outage(self, outage_start_hour: int, target_date: date = None) -> list[tuple[str, str]]:
+    def get_workers_for_outage(self, outage_start_hour: int, target_date: date | None = None) -> list[tuple[str, str]]:
         """
         Get best 2 workers based on outage start time
         Logic:
@@ -158,7 +160,7 @@ class GoogleSheetsService:
             # The worker covering this started at 20:00 YESTERDAY
             lookup_date = target_date - timedelta(days=1)
             preferred_hours = [20]
-            logging.info(f"Early morning outage ({outage_start_hour}:00), checking 20:00 shift on {lookup_date}")
+            logger.info(f"Early morning outage ({outage_start_hour}:00), checking 20:00 shift on {lookup_date}")
         elif outage_start_hour < 19:  # Day outage
             lookup_date = target_date
             all_day_hours = [7, 8, 9, 11, 13, 15, 17]
@@ -173,11 +175,11 @@ class GoogleSheetsService:
             if not preferred_hours:
                 preferred_hours = [min(all_day_hours)]
             
-            logging.info(f"Day outage ({outage_start_hour}:00), checking shifts started at: {preferred_hours}")
+            logger.info(f"Day outage ({outage_start_hour}:00), checking shifts started at: {preferred_hours}")
         else:  # Evening/night outage (e.g. 19:00+)
             lookup_date = target_date
             preferred_hours = [13, 15, 17, 20]  # Evening and night shifts
-            logging.info(f"Evening outage ({outage_start_hour}:00), checking shifts: {preferred_hours}")
+            logger.info(f"Evening outage ({outage_start_hour}:00), checking shifts: {preferred_hours}")
         
         all_candidates = []
         
@@ -221,8 +223,8 @@ class GoogleSheetsService:
                     if name.lower() not in ["прізвище", "імя", "прізвище та ім'я", "worker", "name"]:
                         names.add(name)
             
-            return sorted(list(names))
-        except Exception as e:
-            logging.error(f"Failed to get all worker names: {e}")
+            return sorted(names)
+        except Exception:
+            logger.exception("Failed to get all worker names")
             return []
 

@@ -1,8 +1,12 @@
+import logging
+
 from aiogram import F, Router, types
 
 from bot.services.generator import GeneratorService
 from bot.services.inventory import InventoryService
 from bot.services.weather import WeatherService
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -95,6 +99,5 @@ async def weather_forecast(message: types.Message, weather_service: WeatherServi
         
         await message.answer(text, parse_mode="HTML")
     except Exception as e:
-        import logging
-        logging.error(f"Forecast error: {e}", exc_info=True)
+        logger.exception("Forecast error")
         await message.answer(f"❌ Помилка отримання прогнозу: {e}", parse_mode="HTML")

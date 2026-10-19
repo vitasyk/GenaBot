@@ -11,6 +11,8 @@ from bot.services.notifier import NotifierService
 from bot.services.weather import WeatherService
 from bot.utils.clock import utcnow
 
+logger = logging.getLogger(__name__)
+
 
 class GeneratorService:
     def __init__(self, gen_repo: GeneratorRepository, log_repo: LogRepository, notifier: NotifierService, redis: Redis):
@@ -290,4 +292,4 @@ class GeneratorService:
                     await self.notifier.notify_all(msg)
                     # Set expiry to match the threshold so we don't notify again until the next cycle
                     await self.redis.set(notify_key, "1", ex=int(threshold_h * 3600))
-                    logging.info(f"Sent warming notification for {g.name} (Threshold: {threshold_h}h)")
+                    logger.info(f"Sent warming notification for {g.name} (Threshold: {threshold_h}h)")

@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 
 from aiogram import Bot
@@ -8,6 +9,8 @@ from bot.database.repositories.logs import LogRepository
 from bot.database.repositories.user import UserRepository
 from bot.services.slack import SlackService
 from bot.utils.clock import local_to_utc, utc_to_local, utcnow
+
+logger = logging.getLogger(__name__)
 
 LITERS_PER_CAN = 20
 
@@ -99,8 +102,8 @@ class InventoryService:
                 # "Taken: 20L. Remaining: ..."
                 part = event.details.split("Taken: ")[1].split("L")[0]
                 total_consumed += float(part)
-            except:
-                pass
+            except (AttributeError, IndexError, ValueError):  # details may be NULL or in another format
+                logger.debug("Unparsable TAKE_FUEL details: %r", event.details)
                 
         avg_daily = total_consumed / days if days > 0 else 0
         avg_hourly = avg_daily / 24.0
@@ -136,8 +139,8 @@ class InventoryService:
                 # "Taken: 20L. Remaining: ..."
                 part = event.details.split("Taken: ")[1].split("L")[0]
                 total_consumed += float(part)
-            except:
-                pass
+            except (AttributeError, IndexError, ValueError):  # details may be NULL or in another format
+                logger.debug("Unparsable TAKE_FUEL details: %r", event.details)
         
         return total_consumed
 
@@ -173,8 +176,8 @@ class InventoryService:
             amount = "?"
             try:
                 amount = e.details.split("Taken: ")[1].split("L")[0]
-            except:
-                pass
+            except (AttributeError, IndexError):  # details may be NULL or in another format
+                logger.debug("Unparsable TAKE_FUEL details: %r", e.details)
                 
             history.append({
                 "date": e.timestamp,

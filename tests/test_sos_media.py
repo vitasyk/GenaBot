@@ -55,7 +55,7 @@ async def test_photo_and_pdf_are_attached_largest_photo_size(service):
 
 
 async def test_other_files_and_text_are_rejected(service):
-    svc, gen = service
+    svc, _gen = service
     state = await media_state()
     zip_file = SimpleNamespace(file_id="z", mime_type="application/zip")
 

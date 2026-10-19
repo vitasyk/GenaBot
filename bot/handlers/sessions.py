@@ -18,6 +18,8 @@ from bot.services.inventory import LITERS_PER_CAN, InventoryService
 from bot.services.notifier import NotifierService
 from bot.states import SessionStates
 
+logger = logging.getLogger(__name__)
+
 router = Router()
 
 ANTIGEL_ANSWER = {True: "✅ Так", False: "❌ Ні", None: "не потрібен"}
@@ -253,7 +255,7 @@ async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot:
         try:
             new_stock_cans = await inventory_service.take_fuel(user_id, total_liters) / LITERS_PER_CAN
         except Exception:
-            logging.exception(f"Failed to deduct fuel for session {session_id}, user_id={user_id}")
+            logger.exception(f"Failed to deduct fuel for session {session_id}, user_id={user_id}")
 
     if generator_service:
         for name, liters in gen_fuel_data.items():
@@ -262,7 +264,7 @@ async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot:
                 if antigel_added:
                     await generator_service.reset_antigel(user_id, name)
             except Exception:
-                logging.exception(f"Failed to log refuel for {name}, session {session_id}")
+                logger.exception(f"Failed to log refuel for {name}, session {session_id}")
 
     statuses = await _get_gen_statuses(generator_service)
     gen_list = "\n".join(

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -17,6 +17,7 @@ from bot.keyboards.refuel_kb import get_refuel_kb
 from bot.keyboards.session_kb import get_gen_selection_kb
 from bot.services.generator import GeneratorService
 from bot.states import RefuelAccumulatorStates
+from bot.utils.clock import utcnow
 
 
 def _gen(gen_id: int, name: str, status: GenStatus = GenStatus.stopped, **kw) -> Generator:
@@ -82,7 +83,7 @@ def _service(repo) -> GeneratorService:
 
 
 async def test_disabling_running_generator_stops_it_and_accounts_fuel():
-    gen = _gen(5, "WILSON", GenStatus.running, current_run_start=datetime.utcnow() - timedelta(hours=2))
+    gen = _gen(5, "WILSON", GenStatus.running, current_run_start=utcnow() - timedelta(hours=2))
     repo = MagicMock(get_by_id=AsyncMock(return_value=gen), add_fuel=AsyncMock(return_value=16.0),
                      update_total_hours=AsyncMock(), set_status=AsyncMock())
 
@@ -112,7 +113,7 @@ def _stop_repo(*gens, fuel_left: float = 100.0):
 
 
 async def test_stop_reports_runtime_fuel_and_notifies_all_when_enabled():
-    started = datetime.utcnow() - timedelta(hours=2, minutes=41)
+    started = utcnow() - timedelta(hours=2, minutes=41)
     service = _service(_stop_repo(_gen(5, "WILSON <3>", GenStatus.running, current_run_start=started), fuel_left=101.3))
     service.redis = MagicMock(get=AsyncMock(return_value=None))  # notifications on by default
     service.notifier = MagicMock(notify_all=AsyncMock())
@@ -125,7 +126,7 @@ async def test_stop_reports_runtime_fuel_and_notifies_all_when_enabled():
 
 
 async def test_standby_report_includes_runtime_and_respects_notify_toggle():
-    gen = _gen(5, "WILSON", GenStatus.running, current_run_start=datetime.utcnow() - timedelta(minutes=30))
+    gen = _gen(5, "WILSON", GenStatus.running, current_run_start=utcnow() - timedelta(minutes=30))
     service = _service(_stop_repo(gen))
     service.redis = MagicMock(get=AsyncMock(return_value=b"0"))  # notifications switched off
     service.notifier = MagicMock(notify_all=AsyncMock())

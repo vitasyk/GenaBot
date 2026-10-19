@@ -3,6 +3,8 @@ import logging
 import aiohttp
 from pydantic import SecretStr
 
+logger = logging.getLogger(__name__)
+
 
 class SlackService:
     def __init__(self, webhook_url: SecretStr | None):
@@ -10,7 +12,7 @@ class SlackService:
 
     async def send_message(self, text: str):
         if not self.webhook_url:
-            logging.warning("Slack notification skipped: SLACK_WEBHOOK_URL not configured.")
+            logger.warning("Slack notification skipped: SLACK_WEBHOOK_URL not configured.")
             return
 
         try:
@@ -19,8 +21,8 @@ class SlackService:
                 async with session.post(self.webhook_url, json=payload) as response:
                     if response.status != 200:
                         body = await response.text()
-                        logging.error(f"Slack API error: {response.status} - {body}")
+                        logger.error(f"Slack API error: {response.status} - {body}")
                     else:
-                        logging.info("Slack notification sent successfully.")
+                        logger.info("Slack notification sent successfully.")
         except Exception:
-            logging.warning("Failed to send Slack notification", exc_info=True)
+            logger.warning("Failed to send Slack notification", exc_info=True)

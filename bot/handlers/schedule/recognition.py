@@ -24,6 +24,8 @@ from bot.services.schedule_recognizer import (
 from bot.states import ScheduleStates
 from bot.utils.clock import now_local
 
+logger = logging.getLogger(__name__)
+
 router = Router()
 parser = ScheduleParser()
 recognizer = ScheduleRecognizer()
@@ -80,7 +82,7 @@ async def process_hoe_download_callback(callback: CallbackQuery, state: FSMConte
     try:
         results = await asyncio.wait_for(parser.get_schedules_data(), timeout=30.0)
     except TimeoutError:
-        logging.error("HOE download timed out (30s)")
+        logger.error("HOE download timed out (30s)")
         await _send_cached_schedule(callback, suffix, label, "⚠️ <b>Сайт HOE недоступний (таймаут)</b>")
         return
 
@@ -103,7 +105,7 @@ async def process_hoe_download_callback(callback: CallbackQuery, state: FSMConte
         periods = _hours_to_ranges(await recognizer.recognize(img_bytes, config.QUEUE_NUMBER))
         caption += f"\nЧерга {html.escape(config.QUEUE_NUMBER)} (розпізнано ШІ):\n{_format_ranges(periods)}"
     except ScheduleRecognitionError as e:
-        logging.warning(f"Schedule recognition failed: {e}")
+        logger.warning(f"Schedule recognition failed: {e}")
         caption += f"\n⚠️ Не вдалося розпізнати: {html.escape(str(e))}\nВикористовуйте «✏️ Ввести вручну»."
 
     await callback.message.delete()
@@ -112,7 +114,7 @@ async def process_hoe_download_callback(callback: CallbackQuery, state: FSMConte
         caption=caption,
         parse_mode="HTML"
     )
-    logging.info(f"User {callback.from_user.id} viewed HOE image for {target_date}")
+    logger.info(f"User {callback.from_user.id} viewed HOE image for {target_date}")
 
     if periods is not None and callback.from_user.id in config.ADMIN_IDS:
         await _ask_save_confirmation(callback.message, state, target_date, periods)
@@ -143,7 +145,7 @@ async def process_schedule_screenshot(message: Message, state: FSMContext, user_
     try:
         hours = await recognizer.recognize(file_io.getvalue(), config.QUEUE_NUMBER)
     except ScheduleRecognitionError as e:
-        logging.warning(f"Photo recognition failed: {e}")
+        logger.warning(f"Photo recognition failed: {e}")
         await state.clear()
         await message.answer(
             f"❌ <b>Не вдалося розпізнати графік</b>\n{html.escape(str(e))}\n\n"

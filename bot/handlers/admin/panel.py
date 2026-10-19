@@ -1,7 +1,8 @@
 import html
+import logging
 
 from aiogram import Bot, F, Router, types
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
 
@@ -12,6 +13,8 @@ from bot.database.repositories.user import UserRepository
 from bot.handlers.admin._common import _get_admin_panel_kb
 from bot.scheduler import save_runtime_setting
 from bot.states import AdminStates
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -46,6 +49,7 @@ async def force_schedule_check(callback: types.CallbackQuery, bot: Bot):
             else:
                 await callback.message.edit_text("ℹ️ <b>Результат:</b>\nВідключень не виявлено (або сесія вже існує).", reply_markup=_get_admin_panel_kb(), parse_mode="HTML")
     except Exception as e:
+        logger.exception("Manual outage check failed: user_id=%s", callback.from_user.id)
         safe_error = html.escape(str(e))
         await callback.message.edit_text(f"❌ <b>Помилка:</b>\n{safe_error}", reply_markup=_get_admin_panel_kb(), parse_mode="HTML")
 
@@ -119,8 +123,8 @@ async def do_reset_logs(callback: types.CallbackQuery, log_repo: LogRepository):
 async def admin_close_callback(callback: types.CallbackQuery):
     try:
         await callback.message.delete()
-    except:
-        pass
+    except (TelegramAPIError, AttributeError):  # AttributeError: InaccessibleMessage has no delete()
+        logger.debug("Admin panel close: message not deleted", exc_info=True)
         
     try:
         await callback.answer()

@@ -12,6 +12,8 @@ from bot.database.repositories.user import UserRepository
 from bot.handlers.admin._common import _get_admin_panel_kb
 from bot.states import AdminStates
 
+logger = logging.getLogger(__name__)
+
 router = Router()
 
 # --- User Management Handlers ---
@@ -39,8 +41,7 @@ async def admin_users_list(callback: types.CallbackQuery, user_repo: UserReposit
             parse_mode="HTML"
         )
     except Exception as e:
-        import logging
-        logging.warning(f"Failed to edit admin users list: {e}")
+        logger.warning(f"Failed to edit admin users list: {e}", exc_info=True)
         await callback.answer()
 
 @router.callback_query(F.data == "admin_sheets_workers")
@@ -52,6 +53,7 @@ async def admin_sheets_workers_list(callback: types.CallbackQuery, user_repo: Us
     try:
         sheet_names = await asyncio.to_thread(sheets_service.get_all_worker_names)
     except Exception as e:
+        logger.warning("Admin workers list: Google Sheets unavailable", exc_info=True)
         await callback.answer(f"❌ Помилка Google Sheets: {e!s}", show_alert=True)
         return
 
@@ -85,8 +87,7 @@ async def admin_sheets_workers_list(callback: types.CallbackQuery, user_repo: Us
         if "message is not modified" in str(e):
             await callback.answer("Дані актуальні ✅")
         else:
-            import logging
-            logging.warning(f"Failed to edit workers list: {e}")
+            logger.warning(f"Failed to edit workers list: {e}", exc_info=True)
             await callback.answer()
 
 @router.callback_query(F.data == "admin_next_workers")
@@ -125,7 +126,7 @@ async def admin_next_workers_handler(callback: types.CallbackQuery, bot: Bot):
             for h in range(e.start_hour, e.end_hour):
                 all_slots.append(datetime.combine(e.date, time(h % 24, 0)))
         
-        all_slots = sorted(list(set(all_slots)))
+        all_slots = sorted(set(all_slots))
         
         potential_returns = []
         if all_slots:
@@ -157,7 +158,7 @@ async def admin_next_workers_handler(callback: types.CallbackQuery, bot: Bot):
         try:
             worker_tuples = await asyncio.to_thread(sheets_service.get_workers_for_outage, lookup_dt.hour, lookup_dt.date())
         except Exception as e:
-            logging.warning("Next workers: Google Sheets unavailable", exc_info=True)
+            logger.warning("Next workers: Google Sheets unavailable", exc_info=True)
             await callback.message.edit_text(
                 f"❌ <b>Google Таблиця недоступна</b>\n{html.escape(str(e))}",
                 reply_markup=InlineKeyboardBuilder().row(InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel_back")).as_markup(),

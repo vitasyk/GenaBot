@@ -20,6 +20,8 @@ from bot.services.notifier import NotifierService
 from bot.services.weather import WeatherService
 from bot.utils.clock import utcnow
 
+logger = logging.getLogger(__name__)
+
 # Initialize scheduler with configured timezone
 scheduler = AsyncIOScheduler(timezone=zoneinfo.ZoneInfo(config.TIMEZONE))
 
@@ -215,10 +217,10 @@ async def restore_runtime_settings(redis: Redis) -> None:
         try:
             value = json.loads(raw)
             if isinstance(default, bool) and not isinstance(value, bool):
-                raise ValueError("expected a boolean")
+                raise TypeError("expected a boolean")
             setattr(config, name, type(default)(value))
         except (ValueError, TypeError):
-            logging.warning("Ignoring invalid saved setting %s=%r", name, raw, exc_info=True)
+            logger.warning("Ignoring invalid saved setting %s=%r", name, raw, exc_info=True)
 
 
 async def restore_scheduler_settings(redis: Redis) -> None:
@@ -228,7 +230,7 @@ async def restore_scheduler_settings(redis: Redis) -> None:
         if interval:
             minutes = int(interval)
             scheduler.reschedule_job('check_power_outage_job', trigger='interval', minutes=minutes)
-            logging.info("Restored schedule check interval: %s min", minutes)
+            logger.info("Restored schedule check interval: %s min", minutes)
         await restore_runtime_settings(redis)
     except Exception:
-        logging.exception("Failed to restore scheduler settings")
+        logger.exception("Failed to restore scheduler settings")

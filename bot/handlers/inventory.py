@@ -2,7 +2,7 @@ import html
 import logging
 
 from aiogram import F, Router, types
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -16,6 +16,8 @@ from bot.services.generator import GeneratorService
 from bot.services.inventory import LITERS_PER_CAN, InventoryService
 from bot.states import RefuelAccumulatorStates
 from bot.utils.clock import now_local, utc_to_local
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -68,8 +70,8 @@ async def check_stock(message: types.Message, inventory_service: InventoryServic
 async def stock_close_callback(callback: types.CallbackQuery):
     try:
         await callback.message.delete()
-    except Exception:
-        pass
+    except (TelegramAPIError, AttributeError):  # already deleted, too old, or InaccessibleMessage
+        logger.debug("Stock close: message not deleted", exc_info=True)
     await callback.answer()
 
 @router.callback_query(F.data == "stock_correct_date")
@@ -266,7 +268,7 @@ async def refuel_accumulator_done(callback: types.CallbackQuery, state: FSMConte
         await generator_service.log_refuel(callback.from_user.id, gen_name, total_liters)
     except Exception:
         # Re-raise so DbSessionMiddleware rolls back: never keep stock taken without the generator refuelled
-        logging.exception("Refuel failed: user_id=%s gen=%s liters=%s", callback.from_user.id, gen_name, total_liters)
+        logger.exception("Refuel failed: user_id=%s gen=%s liters=%s", callback.from_user.id, gen_name, total_liters)
         await callback.message.answer("❌ Не вдалося записати заправку, зміни скасовано. Спробуйте ще раз.")
         await callback.answer()
         raise

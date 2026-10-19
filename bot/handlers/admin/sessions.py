@@ -1,8 +1,11 @@
 import html
+import logging
 
 from aiogram import Bot, F, Router, types
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -143,7 +146,8 @@ async def _admin_session_view_logic(callback: types.CallbackQuery, bot: Bot, ses
         
         # answer before editing to stop loading state if triggered by button with callback
         try: await callback.answer()
-        except: pass
+        except TelegramAPIError:
+            logger.debug("Session view: callback answer failed", exc_info=True)
 
         await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
@@ -181,6 +185,7 @@ async def admin_create_session_manual(callback: types.CallbackQuery, bot: Bot):
             await callback.answer(f"✅ Сесію {new_s.id} створено!")
             await admin_sessions_list(callback, bot)
     except Exception as e:
+        logger.exception("Manual session creation failed: user_id=%s", callback.from_user.id)
         await callback.answer(f"❌ Помилка: {e!s}")
 
 @router.callback_query(F.data == "admin_delete_cancelled_sessions")

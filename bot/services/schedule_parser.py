@@ -10,6 +10,8 @@ import certifi
 from bot.config import config
 from bot.utils.clock import now_local
 
+logger = logging.getLogger(__name__)
+
 HOE_BASE_URL = "https://hoe.com.ua"
 
 
@@ -31,9 +33,9 @@ class ScheduleParser:
             path = self._get_cache_path(suffix)
             with open(path, "wb") as f:
                 f.write(image_bytes)
-            logging.info(f"Schedule image saved to cache ({suffix}): {path}")
+            logger.info(f"Schedule image saved to cache ({suffix}): {path}")
         except OSError:
-            logging.exception("Failed to save schedule to cache")
+            logger.exception("Failed to save schedule to cache")
 
     def get_cached_schedule(self, suffix: str = "today") -> bytes | None:
         """Retrieve cached schedule from specific slot"""
@@ -43,7 +45,7 @@ class ScheduleParser:
                 with open(path, "rb") as f:
                     return f.read()
             except OSError:
-                logging.exception(f"Failed to read schedule from cache ({suffix})")
+                logger.exception(f"Failed to read schedule from cache ({suffix})")
         return None
 
     async def get_schedules_data(self) -> list[tuple[datetime, bytes]]:
@@ -56,7 +58,7 @@ class ScheduleParser:
             async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
                 async with session.get(config.HOE_SCHEDULE_URL) as response:
                     if response.status != 200:
-                        logging.error(f"Failed to load HOE page: {response.status}")
+                        logger.error(f"Failed to load HOE page: {response.status}")
                         return []
                     html = await response.text()
 
@@ -74,7 +76,7 @@ class ScheduleParser:
                         if img_resp.status == 200:
                             found[day] = await img_resp.read()
                             self._save_to_cache(found[day], "today" if day == today else "tomorrow")
-                            logging.info(f"Fetched schedule for {day}: {url}")
+                            logger.info(f"Fetched schedule for {day}: {url}")
 
                 for img_tag in re.findall(r'<img[^>]+>', html):
                     src_match = re.search(r'src="(/Content/Uploads/[^"]+\.png)"', img_tag)
@@ -94,10 +96,10 @@ class ScheduleParser:
                 if not found:
                     first_img = re.search(r'src="(/Content/Uploads/[^"]+\.png)"', html)
                     if first_img:
-                        logging.info(f"Fallback: fetching first available image {first_img.group(1)}")
+                        logger.info(f"Fallback: fetching first available image {first_img.group(1)}")
                         await download(first_img.group(1), today)
 
             return [(datetime.combine(d, time.min), b) for d, b in found.items()]
         except Exception:
-            logging.exception("Error fetching schedules")
+            logger.exception("Error fetching schedules")
             return []

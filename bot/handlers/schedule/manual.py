@@ -16,6 +16,8 @@ from bot.keyboards.schedule_kb import get_date_quick_kb, get_schedule_menu_kb
 from bot.states import ScheduleStates
 from bot.utils.clock import now_local
 
+logger = logging.getLogger(__name__)
+
 router = Router()
 
 # Manual Entry State Handlers (Must be AFTER specific button handlers)
@@ -25,7 +27,7 @@ async def process_date_input(message: Message, state: FSMContext, user_repo: Use
     if not message.text:
         return
         
-    logging.info(f"Schedule: process_date_input text='{message.text}' state={await state.get_state()}")
+    logger.info(f"Schedule: process_date_input text='{message.text}' state={await state.get_state()}")
     
     if message.text == "🔙 Скасувати":
         await state.clear()
@@ -35,7 +37,7 @@ async def process_date_input(message: Message, state: FSMContext, user_repo: Use
         
     # Skip if user accidentally pressed another main menu button or command
     if message.text.startswith("/") or message.text in ["✏️ Ввести вручну", "📉 Графік", "🌐 Завантажити з HOE", "📋 Переглянути графік", "🗑️ Очистити графік", "🔙 Головне меню"]:
-        logging.info("Schedule: clearing state due to command/menu button in date input")
+        logger.info("Schedule: clearing state due to command/menu button in date input")
         await state.clear()
         if message.text == "🔙 Головне меню":
              await back_to_main(message, state, user_repo)
@@ -117,7 +119,7 @@ async def process_periods_input(message: Message, state: FSMContext, schedule_re
         "✏️ Ввести вручну", "📉 Графік", "🌐 Завантажити з HOE", "📋 Переглянути графік", 
         "🗑️ Очистити графік", "🔙 Головне меню", "Сьогодні", "Завтра"
     ]:
-        logging.info("Schedule: clearing state due to command/menu button in periods input")
+        logger.info("Schedule: clearing state due to command/menu button in periods input")
         await state.clear()
         if message.text == "🔙 Головне меню":
              await back_to_main(message, state, user_repo)
@@ -147,7 +149,7 @@ async def process_periods_input(message: Message, state: FSMContext, schedule_re
             
             periods.append((start, end))
     
-    except Exception as e:
+    except ValueError as e:
         await message.answer(
             f"❌ Помилка в форматі: {html.escape(str(e))}\n\n"
             "Приклад: <code>0-6, 11-15, 18-23</code>",
@@ -191,7 +193,7 @@ async def confirm_schedule(message: Message, state: FSMContext, schedule_repo: S
         parse_mode="HTML"
     )
     
-    logging.info(f"User {message.from_user.id} saved schedule for {target_date}: {periods}")
+    logger.info(f"User {message.from_user.id} saved schedule for {target_date}: {periods}")
 
 @router.message(ScheduleStates.confirming, F.text == "❌ Скасувати")
 async def cancel_schedule_confirm(message: Message, state: FSMContext, user_repo: UserRepository):

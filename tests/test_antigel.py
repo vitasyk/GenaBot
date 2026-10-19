@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -6,6 +6,7 @@ import pytest
 from bot.database.models import Generator, GenStatus
 from bot.services.antigel import AntigelService, advise, format_advice
 from bot.services.generator import GeneratorService
+from bot.utils.clock import utcnow
 
 JULY, JANUARY = date(2026, 7, 1), date(2026, 1, 15)
 
@@ -49,7 +50,7 @@ async def test_running_burns_untreated_fuel_in_proportion():
     # 100 L in the tank, 40 L of it untreated; burning 50 L leaves 20 L untreated (share stays 40%)
     gen = Generator(id=1, name="WILSON", status=GenStatus.running, fuel_level=100.0, consumption_rate=10.0,
                     total_hours_run=0.0, fuel_since_antigel=40.0,
-                    current_run_start=datetime.utcnow() - timedelta(hours=5))
+                    current_run_start=utcnow() - timedelta(hours=5))
     repo = MagicMock(add_fuel=AsyncMock(return_value=50.0), update_total_hours=AsyncMock(), set_status=AsyncMock())
     service = GeneratorService(repo, MagicMock(log_action=AsyncMock()), MagicMock(), MagicMock())
     service.weather = MagicMock(get_current_temperature=AsyncMock(return_value=5.0),

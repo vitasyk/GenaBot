@@ -1,4 +1,5 @@
 """Schedule repository for managing manual schedule entries"""
+import logging
 from datetime import date
 
 from sqlalchemy import delete, select
@@ -6,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import ScheduleEntry
 from bot.database.repositories.base import BaseRepository
+
+logger = logging.getLogger(__name__)
 
 
 class ScheduleRepository(BaseRepository[ScheduleEntry]):
@@ -21,8 +24,7 @@ class ScheduleRepository(BaseRepository[ScheduleEntry]):
         user_id: int | None = None
     ) -> ScheduleEntry:
         """Create a new schedule entry"""
-        import logging
-        logging.warning(f"DB: Creating schedule entry: {entry_date} {start_hour}-{end_hour} (queue {queue}) by user {user_id}")
+        logger.warning(f"DB: Creating schedule entry: {entry_date} {start_hour}-{end_hour} (queue {queue}) by user {user_id}")
         
         entry = ScheduleEntry(
             date=entry_date,
@@ -54,8 +56,7 @@ class ScheduleRepository(BaseRepository[ScheduleEntry]):
     
     async def clear_all_for_date(self, entry_date: date, queue: str = "1.1") -> int:
         """Clear all entries for a specific date and queue. Returns number of deleted entries."""
-        import logging
-        logging.warning(f"DB: Clearing schedule for {entry_date} (queue {queue})")
+        logger.warning(f"DB: Clearing schedule for {entry_date} (queue {queue})")
         
         stmt = delete(ScheduleEntry).where(
             ScheduleEntry.date == entry_date,

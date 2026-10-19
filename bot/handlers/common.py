@@ -17,6 +17,8 @@ from bot.keyboards.inline_kb import STALE_MENU_TEXT, GenCb, get_sos_kb
 from bot.keyboards.main_kb import get_main_keyboard
 from bot.services.generator import GeneratorService
 
+logger = logging.getLogger(__name__)
+
 router = Router()
 
 SOS_MENU_TEXT = "🆘 <b>Оберіть генератор для інструкції:</b>"
@@ -91,4 +93,4 @@ async def send_instruction_media(message: types.Message, media: list[dict]) -> N
             await message.answer_media_group([InputMediaDocument(media=f) for f in documents])
     except TelegramBadRequest:
         # e.g. a file_id from another bot token; the text part was already shown
-        logging.warning("Failed to send SOS attachments", exc_info=True)
+        logger.warning("Failed to send SOS attachments", exc_info=True)
