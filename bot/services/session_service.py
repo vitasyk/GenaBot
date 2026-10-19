@@ -2,22 +2,25 @@ import asyncio
 import html
 import logging
 import re
-from datetime import datetime, timedelta, time
-from typing import Optional, List
+from datetime import datetime, time, timedelta
+
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import config
+from bot.database.models import GenStatus, RefuelSession, SessionStatus, User
 from bot.database.repositories.generator import GeneratorRepository
-from bot.database.repositories.session import SessionRepository
-from bot.database.repositories.session_helpers import get_all_workers_for_session, split_workers
-from bot.database.repositories.user import UserRepository
 from bot.database.repositories.schedule import ScheduleRepository
+from bot.database.repositories.session import SessionRepository
+from bot.database.repositories.session_helpers import (
+    get_all_workers_for_session,
+    split_workers,
+)
+from bot.database.repositories.user import UserRepository
 from bot.keyboards.inline_kb import get_start_generator_kb
 from bot.keyboards.session_kb import get_start_session_kb
 from bot.services.antigel import AntigelService, format_advice
 from bot.services.google_sheets import GoogleSheetsService
-from bot.database.models import GenStatus, User, RefuelSession, SessionStatus
 from bot.services.notifier import NotifierService
 from bot.services.weather import WeatherService
 from bot.utils.clock import now_local
@@ -48,7 +51,7 @@ class SessionService:
             target_date=lookup_dt.date(),
         )
 
-    async def get_outage_timeline_from_db(self, queue: str) -> List[datetime]:
+    async def get_outage_timeline_from_db(self, queue: str) -> list[datetime]:
         """
         Get timeline from manual database entries instead of parser.
         Returns a list of datetime objects (on the hour) when outages are scheduled.
@@ -69,7 +72,7 @@ class SessionService:
         
         return sorted(list(set(timeline)))  # Remove duplicates and sort
 
-    async def check_power_outage(self) -> Optional[RefuelSession]:
+    async def check_power_outage(self) -> RefuelSession | None:
         """
         Check outage timeline and create session for any recently finished block.
         Ensures workers are notified in real-time when power returns according to schedule.
@@ -236,7 +239,7 @@ class SessionService:
             return f"<a href='tg://user?id={worker_id}'>{name}</a>"
         return f"<b>{name}</b>"
 
-    async def _find_user_by_name_robust(self, name: str) -> Optional[User]:
+    async def _find_user_by_name_robust(self, name: str) -> User | None:
         """Attempt to find user by sheet_name or telegram name with some flexibility"""
         if not name:
             return None

@@ -1,8 +1,11 @@
 from datetime import datetime
+
 from sqlalchemy import select
-from bot.database.repositories.base import BaseRepository
+
 from bot.database.models import Generator, GenStatus
+from bot.database.repositories.base import BaseRepository
 from bot.utils.clock import utcnow
+
 
 class GeneratorRepository(BaseRepository[Generator]):
     def __init__(self, session):

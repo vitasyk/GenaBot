@@ -1,8 +1,11 @@
 import asyncio
 import logging
+
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
+
 from bot.config import config
+
 
 async def main():
     logging.basicConfig(level=logging.INFO)
@@ -33,9 +36,8 @@ async def main():
     
     # Register middlewares
     from bot.database.main import session_maker
-    from bot.middlewares.di import DbSessionMiddleware
     from bot.middlewares.access import AccessMiddleware
-    
+    from bot.middlewares.di import DbSessionMiddleware
     from bot.services.notifier import NotifierService
     notifier = NotifierService(bot)
     
@@ -45,8 +47,16 @@ async def main():
     dp.callback_query.outer_middleware(AccessMiddleware())
     
     # Register routers
-    from bot.handlers import common, inventory, generators, weather, admin, sessions, schedule
-    from bot.handlers import errors
+    from bot.handlers import (
+        admin,
+        common,
+        errors,
+        generators,
+        inventory,
+        schedule,
+        sessions,
+        weather,
+    )
     
     dp.include_router(admin.router) # Priority for admin commands like "Admin Panel"
     dp.include_router(schedule.router) # Schedule management

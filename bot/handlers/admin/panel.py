@@ -33,8 +33,8 @@ async def admin_panel_handler(message: types.Message, user_repo: UserRepository)
 async def force_schedule_check(callback: types.CallbackQuery, bot: Bot):
     await callback.message.edit_text("⏳ <b>Перевірка графіку...</b>\nЦе може зайняти кілька секунд.", parse_mode="HTML")
     
-    from bot.services.session_service import SessionService
     from bot.database.main import session_maker
+    from bot.services.session_service import SessionService
     
     try:
         async with session_maker() as session:
@@ -129,8 +129,9 @@ async def admin_close_callback(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "admin_view_logs")
 async def admin_view_logs(callback: types.CallbackQuery, log_repo: LogRepository, user_repo: UserRepository):
-    from bot.config import config
     import zoneinfo
+
+    from bot.config import config
     tz = zoneinfo.ZoneInfo(config.TIMEZONE)
     
     logs = await log_repo.get_recent_logs(limit=20)

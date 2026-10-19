@@ -1,9 +1,10 @@
 from collections.abc import Sequence
 
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.database.models import Generator
 from bot.keyboards.inline_kb import GenCb, status_icon
+
 
 def get_start_session_kb(session_id: int) -> InlineKeyboardMarkup:
     """Keyboard for 'Start Refueling' notification"""

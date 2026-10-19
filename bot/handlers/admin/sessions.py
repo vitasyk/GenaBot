@@ -157,8 +157,8 @@ async def admin_session_cancel(callback: types.CallbackQuery, bot: Bot):
     session_id = int(callback.data.split(":")[1])
     
     from bot.database.main import session_maker
-    from bot.database.repositories.session import SessionRepository
     from bot.database.models import SessionStatus
+    from bot.database.repositories.session import SessionRepository
     
     async with session_maker() as session:
         repo = SessionRepository(session)
@@ -171,8 +171,8 @@ async def admin_session_cancel(callback: types.CallbackQuery, bot: Bot):
 
 @router.callback_query(F.data == "admin_create_session_manual")
 async def admin_create_session_manual(callback: types.CallbackQuery, bot: Bot):
-    from bot.services.session_service import SessionService
     from bot.database.main import session_maker
+    from bot.services.session_service import SessionService
     
     try:
         async with session_maker() as session:
@@ -181,7 +181,7 @@ async def admin_create_session_manual(callback: types.CallbackQuery, bot: Bot):
             await callback.answer(f"✅ Сесію {new_s.id} створено!")
             await admin_sessions_list(callback, bot)
     except Exception as e:
-        await callback.answer(f"❌ Помилка: {str(e)}")
+        await callback.answer(f"❌ Помилка: {e!s}")
 
 @router.callback_query(F.data == "admin_delete_cancelled_sessions")
 async def admin_delete_cancelled_sessions(callback: types.CallbackQuery, bot: Bot):

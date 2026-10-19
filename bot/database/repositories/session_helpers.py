@@ -1,8 +1,8 @@
-from typing import List, Optional
+
 from bot.database.models import RefuelSession
 
 
-def get_all_workers_for_session(session: RefuelSession) -> List[int]:
+def get_all_workers_for_session(session: RefuelSession) -> list[int]:
     """
     Get all worker IDs assigned to a session (worker1, worker2, worker3 + additional_workers).
     Returns a list of unique worker IDs.
@@ -24,7 +24,7 @@ def get_all_workers_for_session(session: RefuelSession) -> List[int]:
     return list(dict.fromkeys(workers))
 
 
-def split_workers(worker_ids: List[int]) -> tuple[Optional[int], Optional[int], Optional[int], List[int]]:
+def split_workers(worker_ids: list[int]) -> tuple[int | None, int | None, int | None, list[int]]:
     """
     Split a list of worker IDs into first 3 + additional workers.
     Returns: (worker1_id, worker2_id, worker3_id, additional_workers)

@@ -1,7 +1,8 @@
-from aiogram import Router, F, types
-from bot.services.weather import WeatherService
+from aiogram import F, Router, types
+
 from bot.services.generator import GeneratorService
 from bot.services.inventory import InventoryService
+from bot.services.weather import WeatherService
 
 router = Router()
 

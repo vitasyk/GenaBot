@@ -1,11 +1,13 @@
-import gspread
-from google.oauth2.service_account import Credentials
-from bot.config import config
-from bot.utils.clock import now_local
-from datetime import date, timedelta
-from typing import Optional, List, Tuple
 import logging
 import re
+from datetime import date, timedelta
+
+import gspread
+from google.oauth2.service_account import Credentials
+
+from bot.config import config
+from bot.utils.clock import now_local
+
 
 class GoogleSheetsService:
     """Service for reading worker shift schedule from Google Sheets (calendar format)"""
@@ -52,7 +54,7 @@ class GoogleSheetsService:
                 logging.warning(f"Using first worksheet as fallback: {self.worksheet.title}")
             raise
     
-    def _find_date_column(self, target_date: date, all_values: List[List[str]]) -> Optional[int]:
+    def _find_date_column(self, target_date: date, all_values: list[list[str]]) -> int | None:
         """
         Find column index for specific date
         Returns column index (0-based) or None
@@ -92,7 +94,7 @@ class GoogleSheetsService:
         # and cycle through weeks
         return 2 + (day_num - 1)  # Rough estimate
     
-    def get_workers_for_time(self, target_date: date, start_hour: int) -> List[Tuple[str, str]]:
+    def get_workers_for_time(self, target_date: date, start_hour: int) -> list[tuple[str, str]]:
         """
         Get workers who start work at specific hour on specific date
         Returns: [(name, phone), ...]
@@ -140,7 +142,7 @@ class GoogleSheetsService:
         
         return workers
     
-    def get_workers_for_outage(self, outage_start_hour: int, target_date: date = None) -> List[Tuple[str, str]]:
+    def get_workers_for_outage(self, outage_start_hour: int, target_date: date = None) -> list[tuple[str, str]]:
         """
         Get best 2 workers based on outage start time
         Logic:
@@ -195,7 +197,7 @@ class GoogleSheetsService:
         
         return unique_candidates  # Return all workers (no limit)
 
-    def get_all_worker_names(self) -> List[str]:
+    def get_all_worker_names(self) -> list[str]:
         """
         Extract unique worker names from rows 3-60 of the first column.
         Uses current month's worksheet.

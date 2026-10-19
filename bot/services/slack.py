@@ -1,6 +1,8 @@
-import aiohttp
 import logging
+
+import aiohttp
 from pydantic import SecretStr
+
 
 class SlackService:
     def __init__(self, webhook_url: SecretStr | None):

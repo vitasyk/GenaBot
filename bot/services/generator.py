@@ -1,13 +1,16 @@
 import html
 import logging
+
+from redis.asyncio import Redis
+
+from bot.database.models import Generator, GenStatus
 from bot.database.repositories.generator import GeneratorRepository
 from bot.database.repositories.logs import LogRepository
-from bot.database.models import Generator, GenStatus
 from bot.services.antigel import AntigelService
-from bot.services.weather import WeatherService
 from bot.services.notifier import NotifierService
+from bot.services.weather import WeatherService
 from bot.utils.clock import utcnow
-from redis.asyncio import Redis
+
 
 class GeneratorService:
     def __init__(self, gen_repo: GeneratorRepository, log_repo: LogRepository, notifier: NotifierService, redis: Redis):
@@ -166,8 +169,7 @@ class GeneratorService:
             return None
 
         now = utcnow()
-        if now < gen.current_run_start:
-            now = gen.current_run_start
+        now = max(now, gen.current_run_start)
             
         runtime_hours = (now - gen.current_run_start).total_seconds() / 3600.0
         

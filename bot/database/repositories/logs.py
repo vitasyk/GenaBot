@@ -1,5 +1,6 @@
-from bot.database.repositories.base import BaseRepository
 from bot.database.models import LogEvent
+from bot.database.repositories.base import BaseRepository
+
 
 class LogRepository(BaseRepository[LogEvent]):
     def __init__(self, session):
@@ -10,7 +11,7 @@ class LogRepository(BaseRepository[LogEvent]):
         self.session.add(event)
 
     async def get_last_action(self, action: str) -> LogEvent | None:
-        from sqlalchemy import select, desc
+        from sqlalchemy import desc, select
         stmt = select(LogEvent).where(LogEvent.action == action).order_by(desc(LogEvent.timestamp)).limit(1)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -26,7 +27,7 @@ class LogRepository(BaseRepository[LogEvent]):
         await self.session.execute(delete(LogEvent))
 
     async def get_recent_logs(self, limit: int = 25) -> list[LogEvent]:
-        from sqlalchemy import select, desc
+        from sqlalchemy import desc, select
         stmt = select(LogEvent).order_by(desc(LogEvent.timestamp)).limit(limit)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())

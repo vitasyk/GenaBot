@@ -37,7 +37,7 @@ async def start_photo_recognition(message: Message, state: FSMContext, user_repo
     
     await state.set_state(ScheduleStates.waiting_for_screenshot)
     
-    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+    from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
     cancel_kb = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="🔙 Скасувати")]],
         resize_keyboard=True
@@ -79,7 +79,7 @@ async def process_hoe_download_callback(callback: CallbackQuery, state: FSMConte
 
     try:
         results = await asyncio.wait_for(parser.get_schedules_data(), timeout=30.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logging.error("HOE download timed out (30s)")
         await _send_cached_schedule(callback, suffix, label, "⚠️ <b>Сайт HOE недоступний (таймаут)</b>")
         return

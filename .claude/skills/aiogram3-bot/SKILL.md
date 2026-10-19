@@ -89,7 +89,7 @@ broadcasts with small delays (Telegram limit ~30 msg/s globally, 1 msg/s per cha
 `TelegramRetryAfter` by sleeping `e.retry_after`.
 
 ## Domain flow (how the bot works today)
-- Outage schedule: admins enter hours in "📉 Графік" (`handlers/schedule.py` →
+- Outage schedule: admins enter hours in "📉 Графік" (`handlers/schedule/` →
   `schedule_entries`). `SessionService.check_power_outage` (job, every minute) reads today and
   tomorrow and creates a refuel session when power **returns** (end of a block).
 - A session is sent to every worker on shift (Google Sheets roster, `services/google_sheets.py`);

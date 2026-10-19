@@ -1,6 +1,5 @@
 import html
 from datetime import date
-from typing import List, Tuple
 
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
@@ -10,12 +9,12 @@ from bot.keyboards.schedule_kb import get_confirm_kb
 from bot.states import ScheduleStates
 
 
-def _format_ranges(ranges: List[Tuple[int, int]]) -> str:
+def _format_ranges(ranges: list[tuple[int, int]]) -> str:
     if not ranges:
         return "• відключень немає"
     return "\n".join(f"• {s:02d}:00 - {e:02d}:00" for s, e in ranges)
 
-async def _ask_save_confirmation(message: Message, state: FSMContext, target_date: date, periods: List[Tuple[int, int]]):
+async def _ask_save_confirmation(message: Message, state: FSMContext, target_date: date, periods: list[tuple[int, int]]):
     """Shows the periods to save and waits for ✅/❌ (handled by confirm_schedule)."""
     await state.update_data(target_date=target_date.isoformat(), periods=periods)
     await state.set_state(ScheduleStates.confirming)
@@ -29,7 +28,7 @@ async def _ask_save_confirmation(message: Message, state: FSMContext, target_dat
         parse_mode="HTML"
     )
 
-def _hours_to_ranges(hours: List[int]) -> List[tuple[int, int]]:
+def _hours_to_ranges(hours: list[int]) -> list[tuple[int, int]]:
     """Convert list of hours to list of (start, end) ranges"""
     if not hours:
         return []

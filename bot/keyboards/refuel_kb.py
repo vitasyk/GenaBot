@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.database.models import Generator
 from bot.keyboards.inline_kb import get_generator_pick_kb

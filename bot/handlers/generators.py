@@ -1,8 +1,11 @@
-from aiogram import Router, F, types
 import logging
+from datetime import UTC
+
+from aiogram import F, Router, types
 from aiogram.fsm.context import FSMContext
-from bot.states import GenStates
-from bot.services.generator import GeneratorService
+from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
+
+from bot.database.models import GenStatus
 from bot.keyboards.inline_kb import (
     STALE_MENU_TEXT,
     GenCb,
@@ -10,8 +13,8 @@ from bot.keyboards.inline_kb import (
     get_generator_pick_kb,
 )
 from bot.keyboards.main_kb import MENU_BUTTONS
-from bot.database.models import GenStatus
-from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
+from bot.services.generator import GeneratorService
+from bot.states import GenStates
 
 router = Router()
 
@@ -65,15 +68,15 @@ async def _get_status_panel(generator_service: GeneratorService, with_keyboard: 
              text += f"   ⏳ <b>Вистачить на:</b> ~{hours_left:.1f} год\n"
              if g.current_run_start:
                   # Convert UTC to Configured Timezone
-                  from bot.config import config
-                  from datetime import timezone
                   import zoneinfo
+
+                  from bot.config import config
                   
                   try:
                       tz = zoneinfo.ZoneInfo(config.TIMEZONE)
                       # Ensure current_run_start is aware (it's naive usually in SQLAlchemy if not forced)
                       # Assuming it's UTC naive
-                      utc_time = g.current_run_start.replace(tzinfo=timezone.utc)
+                      utc_time = g.current_run_start.replace(tzinfo=UTC)
                       local_time = utc_time.astimezone(tz)
                       time_str = local_time.strftime('%H:%M')
                   except Exception as e:

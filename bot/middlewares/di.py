@@ -1,20 +1,23 @@
-from typing import Callable, Dict, Any, Awaitable
+from collections.abc import Awaitable, Callable
+from typing import Any
+
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject
-from sqlalchemy.ext.asyncio import async_sessionmaker
 from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from bot.database.repositories.user import UserRepository
+from bot.config import config
+from bot.database.repositories.generator import GeneratorRepository
 from bot.database.repositories.inventory import InventoryRepository
 from bot.database.repositories.logs import LogRepository
-from bot.database.repositories.generator import GeneratorRepository
 from bot.database.repositories.schedule import ScheduleRepository
-from bot.services.inventory import InventoryService
+from bot.database.repositories.user import UserRepository
 from bot.services.generator import GeneratorService
-from bot.services.weather import WeatherService
+from bot.services.inventory import InventoryService
 from bot.services.notifier import NotifierService
 from bot.services.slack import SlackService
-from bot.config import config
+from bot.services.weather import WeatherService
+
 
 class DbSessionMiddleware(BaseMiddleware):
     def __init__(self, session_pool: async_sessionmaker, redis: Redis, notifier: NotifierService):
@@ -25,9 +28,9 @@ class DbSessionMiddleware(BaseMiddleware):
 
     async def __call__(
         self,
-        handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
         event: TelegramObject,
-        data: Dict[str, Any],
+        data: dict[str, Any],
     ) -> Any:
         async with self.session_pool() as session:
             # Repositories

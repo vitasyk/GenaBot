@@ -52,7 +52,7 @@ async def admin_sheets_workers_list(callback: types.CallbackQuery, user_repo: Us
     try:
         sheet_names = await asyncio.to_thread(sheets_service.get_all_worker_names)
     except Exception as e:
-        await callback.answer(f"❌ Помилка Google Sheets: {str(e)}", show_alert=True)
+        await callback.answer(f"❌ Помилка Google Sheets: {e!s}", show_alert=True)
         return
 
     # 2. Get all registered users to check mapping
@@ -91,12 +91,13 @@ async def admin_sheets_workers_list(callback: types.CallbackQuery, user_repo: Us
 
 @router.callback_query(F.data == "admin_next_workers")
 async def admin_next_workers_handler(callback: types.CallbackQuery, bot: Bot):
-    from bot.database.main import session_maker
-    from bot.database.repositories.schedule import ScheduleRepository
-    from bot.services.google_sheets import GoogleSheetsService
-    from bot.database.repositories.user import UserRepository
     import zoneinfo
     from datetime import datetime, time, timedelta
+
+    from bot.database.main import session_maker
+    from bot.database.repositories.schedule import ScheduleRepository
+    from bot.database.repositories.user import UserRepository
+    from bot.services.google_sheets import GoogleSheetsService
 
     tz = zoneinfo.ZoneInfo(config.TIMEZONE)
     now = datetime.now(tz)

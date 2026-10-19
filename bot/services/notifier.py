@@ -1,6 +1,7 @@
 import logging
 
 from aiogram import Bot
+
 from bot.config import config
 
 logger = logging.getLogger(__name__)

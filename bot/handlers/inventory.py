@@ -1,19 +1,21 @@
-from aiogram import Router, F, types
 import html
 import logging
+
+from aiogram import F, Router, types
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
 from bot.database.repositories.user import UserRepository
 from bot.keyboards.inline_kb import STALE_MENU_TEXT, GenCb, status_icon
-from bot.keyboards.refuel_kb import get_refuel_kb, get_refuel_accumulator_kb
 from bot.keyboards.inventory_kb import get_inventory_kb
+from bot.keyboards.refuel_kb import get_refuel_accumulator_kb, get_refuel_kb
 from bot.services.antigel import format_advice
 from bot.services.generator import GeneratorService
 from bot.services.inventory import LITERS_PER_CAN, InventoryService
-from bot.utils.clock import now_local, utc_to_local
-from aiogram.fsm.context import FSMContext
 from bot.states import RefuelAccumulatorStates
+from bot.utils.clock import now_local, utc_to_local
 
 router = Router()
 

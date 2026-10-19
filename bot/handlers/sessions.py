@@ -1,23 +1,22 @@
 import html
 import logging
 
-from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message
+from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram import Bot
+from aiogram.types import CallbackQuery, Message
 
-from bot.states import SessionStates
 from bot.database.main import session_maker
-from bot.database.repositories.session import OPEN_STATUSES, SessionRepository
-from bot.services.notifier import NotifierService
-from bot.services.generator import GeneratorService
-from bot.services.inventory import LITERS_PER_CAN, InventoryService
 from bot.database.models import SessionStatus
+from bot.database.repositories.session import OPEN_STATUSES, SessionRepository
 from bot.keyboards.inline_kb import STALE_MENU_TEXT, GenCb, status_icon
 from bot.keyboards.session_kb import (
-    get_in_progress_kb, 
     get_gen_selection_kb,
+    get_in_progress_kb,
 )
+from bot.services.generator import GeneratorService
+from bot.services.inventory import LITERS_PER_CAN, InventoryService
+from bot.services.notifier import NotifierService
+from bot.states import SessionStates
 
 router = Router()
 

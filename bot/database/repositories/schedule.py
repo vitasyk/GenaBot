@@ -1,7 +1,7 @@
 """Schedule repository for managing manual schedule entries"""
 from datetime import date
-from typing import List, Optional
-from sqlalchemy import select, delete
+
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import ScheduleEntry
@@ -18,7 +18,7 @@ class ScheduleRepository(BaseRepository[ScheduleEntry]):
         queue: str, 
         start_hour: int, 
         end_hour: int,
-        user_id: Optional[int] = None
+        user_id: int | None = None
     ) -> ScheduleEntry:
         """Create a new schedule entry"""
         import logging
@@ -35,7 +35,7 @@ class ScheduleRepository(BaseRepository[ScheduleEntry]):
         await self.session.flush()
         return entry
     
-    async def get_entries_for_date(self, entry_date: date, queue: str = "1.1") -> List[ScheduleEntry]:
+    async def get_entries_for_date(self, entry_date: date, queue: str = "1.1") -> list[ScheduleEntry]:
         """Get all schedule entries for a specific date and queue"""
         stmt = select(ScheduleEntry).where(
             ScheduleEntry.date == entry_date,
@@ -70,7 +70,7 @@ class ScheduleRepository(BaseRepository[ScheduleEntry]):
         start_date: date, 
         end_date: date, 
         queue: str = "1.1"
-    ) -> List[ScheduleEntry]:
+    ) -> list[ScheduleEntry]:
         """Get all entries within a date range"""
         stmt = select(ScheduleEntry).where(
             ScheduleEntry.date >= start_date,

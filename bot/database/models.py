@@ -1,16 +1,31 @@
 from datetime import datetime
 from enum import Enum, StrEnum
-from sqlalchemy import BigInteger, Boolean, String, Text, DateTime, ForeignKey, Integer, Float, Date, JSON, true
+
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    true,
+)
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.ext.asyncio import AsyncAttrs
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from bot.utils.clock import utcnow
+
 
 class Base(AsyncAttrs, DeclarativeBase):
     pass
 
 from sqlalchemy.dialects.postgresql import ENUM as pgENUM
+
 
 class UserRole(str, Enum):
     admin = "admin"

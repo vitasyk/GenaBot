@@ -1,14 +1,20 @@
 import html
 import logging
 
-from aiogram import Router, F, types
+from aiogram import F, Router, types
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.filters import CommandStart, Command
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaDocument, InputMediaPhoto
+from aiogram.filters import Command, CommandStart
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputMediaDocument,
+    InputMediaPhoto,
+)
+
+from bot.database.models import UserRole
 from bot.database.repositories.user import UserRepository
 from bot.keyboards.inline_kb import STALE_MENU_TEXT, GenCb, get_sos_kb
 from bot.keyboards.main_kb import get_main_keyboard
-from bot.database.models import UserRole
 from bot.services.generator import GeneratorService
 
 router = Router()

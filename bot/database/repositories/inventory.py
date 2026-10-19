@@ -1,6 +1,8 @@
 from sqlalchemy import select
-from bot.database.repositories.base import BaseRepository
+
 from bot.database.models import Inventory
+from bot.database.repositories.base import BaseRepository
+
 
 class InventoryRepository(BaseRepository[Inventory]):
     def __init__(self, session):
@@ -33,7 +35,6 @@ class InventoryRepository(BaseRepository[Inventory]):
             self.session.add(inventory)
         
         inventory.fuel_cans += change
-        if inventory.fuel_cans < 0:
-            inventory.fuel_cans = 0
+        inventory.fuel_cans = max(inventory.fuel_cans, 0)
             
         return inventory.fuel_cans

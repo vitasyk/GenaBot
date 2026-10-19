@@ -1,5 +1,6 @@
 from aiogram.fsm.state import State, StatesGroup
 
+
 class GenStates(StatesGroup):
     waiting_for_fuel_amount = State()
     waiting_for_tank_capacity = State()

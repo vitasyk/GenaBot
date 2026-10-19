@@ -1,10 +1,12 @@
 from datetime import datetime
+
+from aiogram import Bot
+
+from bot.config import config
 from bot.database.repositories.inventory import InventoryRepository
 from bot.database.repositories.logs import LogRepository
 from bot.database.repositories.user import UserRepository
 from bot.services.slack import SlackService
-from bot.config import config
-from aiogram import Bot
 from bot.utils.clock import local_to_utc, utc_to_local, utcnow
 
 LITERS_PER_CAN = 20
@@ -143,8 +145,9 @@ class InventoryService:
         """
         Returns last N consumption events.
         """
+        from sqlalchemy import desc, select
+
         from bot.database.models import LogEvent
-        from sqlalchemy import select, desc
         
         # We need to access repo session directly or through logs repo if it exposes query
         # LogRepository usually has basic methods. let's check logs repo or use session directly

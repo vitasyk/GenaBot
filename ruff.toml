@@ -1,0 +1,5 @@
+target-version = "py311"
+
+[lint]
+# Files on the Windows bind mount look executable to ruff
+ignore = ["EXE002"]

@@ -84,7 +84,7 @@ async def process_date_input(message: Message, state: FSMContext, user_repo: Use
     await state.set_state(ScheduleStates.waiting_for_periods)
     
     # Send cancel only keyboard for periods input
-    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+    from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
     cancel_kb = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="🔙 Скасувати")]],
         resize_keyboard=True

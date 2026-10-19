@@ -1,7 +1,8 @@
 from sqlalchemy import select
-from bot.database.repositories.base import BaseRepository
+
 from bot.config import config
 from bot.database.models import User, UserRole
+from bot.database.repositories.base import BaseRepository
 
 
 def resolve_role(user_id: int) -> UserRole:

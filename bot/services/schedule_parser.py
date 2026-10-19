@@ -3,7 +3,6 @@ import os
 import re
 import ssl
 from datetime import date, datetime, time, timedelta
-from typing import List, Optional
 
 import aiohttp
 import certifi
@@ -36,7 +35,7 @@ class ScheduleParser:
         except OSError:
             logging.exception("Failed to save schedule to cache")
 
-    def get_cached_schedule(self, suffix: str = "today") -> Optional[bytes]:
+    def get_cached_schedule(self, suffix: str = "today") -> bytes | None:
         """Retrieve cached schedule from specific slot"""
         path = self._get_cache_path(suffix)
         if os.path.exists(path):
@@ -47,7 +46,7 @@ class ScheduleParser:
                 logging.exception(f"Failed to read schedule from cache ({suffix})")
         return None
 
-    async def get_schedules_data(self) -> List[tuple[datetime, bytes]]:
+    async def get_schedules_data(self) -> list[tuple[datetime, bytes]]:
         """Scrape the site and download schedule images for today and tomorrow: [(date, image_bytes)]"""
         try:
             ssl_context = ssl.create_default_context(cafile=certifi.where())

@@ -1,6 +1,6 @@
 from datetime import datetime
-from typing import Optional, List
-from sqlalchemy import select, update, delete
+
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import RefuelSession, SessionStatus
@@ -16,10 +16,10 @@ class SessionRepository:
     async def create_session(self, 
                              start_time: datetime, 
                              deadline: datetime, 
-                             worker1_id: Optional[int] = None, 
-                             worker2_id: Optional[int] = None,
-                             worker3_id: Optional[int] = None,
-                             additional_workers: Optional[List[int]] = None) -> RefuelSession:
+                             worker1_id: int | None = None, 
+                             worker2_id: int | None = None,
+                             worker3_id: int | None = None,
+                             additional_workers: list[int] | None = None) -> RefuelSession:
         new_session = RefuelSession(
             start_time=start_time,
             deadline=deadline,
@@ -34,7 +34,7 @@ class SessionRepository:
         await self.session.refresh(new_session)
         return new_session
         
-    async def get_overdue_sessions(self, now: datetime) -> List[RefuelSession]:
+    async def get_overdue_sessions(self, now: datetime) -> list[RefuelSession]:
         """Pending/in-progress sessions whose deadline has passed (all of them, not only the latest)."""
         stmt = select(RefuelSession).where(
             RefuelSession.status.in_([SessionStatus.pending, SessionStatus.in_progress]),
@@ -43,7 +43,7 @@ class SessionRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
-    async def get_session_by_id(self, session_id: int) -> Optional[RefuelSession]:
+    async def get_session_by_id(self, session_id: int) -> RefuelSession | None:
         return await self.session.get(RefuelSession, session_id)
         
     async def exists_by_start_time(self, start_time: datetime) -> bool:
@@ -53,7 +53,7 @@ class SessionRepository:
         return result.scalars().first() is not None
         
     async def update_status(self, session_id: int, status: SessionStatus,
-                            only_from: Optional[List[SessionStatus]] = None) -> Optional[RefuelSession]:
+                            only_from: list[SessionStatus] | None = None) -> RefuelSession | None:
         """Sets status. With only_from, changes the session only if its current status is in that
         list and returns None otherwise (another worker already started/finished it)."""
         stmt = update(RefuelSession).where(RefuelSession.id == session_id).values(status=status)
@@ -71,7 +71,7 @@ class SessionRepository:
                                gen_name: str,
                                liters: float,
                                cans: float,
-                               notes: str = None) -> Optional[RefuelSession]:
+                               notes: str = None) -> RefuelSession | None:
         """Completes an open session. Returns None if it was already completed or cancelled,
         so a second worker can't record (and deduct) the same refuel twice."""
         stmt = update(RefuelSession).where(
@@ -92,7 +92,7 @@ class SessionRepository:
             return None
         return await self.get_session_by_id(session_id)
         
-    async def get_history(self, limit: int = 10) -> List[RefuelSession]:
+    async def get_history(self, limit: int = 10) -> list[RefuelSession]:
         stmt = select(RefuelSession).order_by(RefuelSession.start_time.desc()).limit(limit)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())

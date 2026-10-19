@@ -1,24 +1,24 @@
 import html
 import json
 import logging
+import zoneinfo
 from collections.abc import Sequence
 
+from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from redis.asyncio import Redis
 
 from bot.config import config
 from bot.database.main import session_maker
-from bot.database.repositories.inventory import InventoryRepository
-from bot.database.repositories.generator import GeneratorRepository
 from bot.database.models import Generator, GenStatus
+from bot.database.repositories.generator import GeneratorRepository
+from bot.database.repositories.inventory import InventoryRepository
 from bot.services.inventory import LITERS_PER_CAN
 from bot.services.notifier import NotifierService
 from bot.services.weather import WeatherService
 from bot.utils.clock import utcnow
-from aiogram import Bot
-import zoneinfo
 
 # Initialize scheduler with configured timezone
 scheduler = AsyncIOScheduler(timezone=zoneinfo.ZoneInfo(config.TIMEZONE))
@@ -159,9 +159,9 @@ async def check_power_outage_job(bot: Bot, redis: Redis):
         await service.check_power_outage()
 
 async def warming_check_job(bot: Bot, redis: Redis):
-    from bot.services.generator import GeneratorService
     from bot.database.repositories.generator import GeneratorRepository
     from bot.database.repositories.logs import LogRepository
+    from bot.services.generator import GeneratorService
 
     async with session_maker() as session:
         gen_repo = GeneratorRepository(session)

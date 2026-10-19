@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -11,7 +11,11 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from bot.config import config
 from bot.handlers.schedule import _common, manual, queue
 from bot.scheduler import restore_runtime_settings
-from bot.services.schedule_recognizer import RecognizedSchedule, ScheduleRecognitionError, ScheduleRecognizer
+from bot.services.schedule_recognizer import (
+    RecognizedSchedule,
+    ScheduleRecognitionError,
+    ScheduleRecognizer,
+)
 from bot.states import ScheduleStates
 from bot.utils import clock
 
@@ -30,7 +34,7 @@ def message(text: str) -> MagicMock:
 
 def test_now_local_is_kyiv_time_not_container_utc():
     # Regression: in Docker datetime.now() is UTC, so "today" was yesterday between 00:00 and 03:00 Kyiv
-    utc_late_evening = datetime(2026, 10, 18, 22, 30, tzinfo=timezone.utc)
+    utc_late_evening = datetime(2026, 10, 18, 22, 30, tzinfo=UTC)
     with patch.object(clock, "datetime") as fake_dt:
         fake_dt.now.side_effect = lambda tz: utc_late_evening.astimezone(tz)
         assert clock.now_local() == datetime(2026, 10, 19, 1, 30)

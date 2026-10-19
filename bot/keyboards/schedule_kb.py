@@ -1,5 +1,11 @@
 """Keyboards for schedule management"""
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
+
 
 def get_hoe_selection_kb() -> InlineKeyboardMarkup:
     """Inline keyboard for HOE download selection"""
