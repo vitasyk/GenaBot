@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
-from datetime import datetime
 from redis.asyncio import Redis
 
 from bot.config import config
@@ -14,8 +13,10 @@ from bot.database.main import session_maker
 from bot.database.repositories.inventory import InventoryRepository
 from bot.database.repositories.generator import GeneratorRepository
 from bot.database.models import Generator, GenStatus
+from bot.services.inventory import LITERS_PER_CAN
 from bot.services.notifier import NotifierService
 from bot.services.weather import WeatherService
+from bot.utils.clock import utcnow
 from aiogram import Bot
 import zoneinfo
 
@@ -25,6 +26,9 @@ scheduler = AsyncIOScheduler(timezone=zoneinfo.ZoneInfo(config.TIMEZONE))
 DEFAULT_OUTAGE_CHECK_MINUTES = 1
 MAINTENANCE_INTERVAL_HOURS = 100
 MAINTENANCE_MARK_KEY = "maintenance:last_mark:{gen_id}"
+# Continuous run hours: recommend switching / demand switching to another generator
+ROTATION_WARN_HOURS = 4
+ROTATION_CRITICAL_HOURS = 6
 # config attribute -> Redis key for values admins change at runtime
 RUNTIME_SETTING_KEYS = {
     "RESTRICT_ACCESS": "config:restrict_access",
@@ -45,21 +49,17 @@ async def check_rotation_needed(bot: Bot):
             return
 
         # Calculate duration
-        now = datetime.utcnow()
+        now = utcnow()
         duration = now - running_gen.current_run_start
         hours_run = duration.total_seconds() / 3600
-        
-        # Thresholds
-        WARN_HOURS = 4
-        CRITICAL_HOURS = 6
-        
+
         msg = ""
-        if hours_run >= CRITICAL_HOURS:
+        if hours_run >= ROTATION_CRITICAL_HOURS:
             msg = f"⚠️ <b>УВАГА: ПОТРІБНА РОТАЦІЯ!</b>\nГенератор {running_gen.name} працює вже {hours_run:.1f} год.\nТерміново перемкніть на інший!"
-        elif hours_run >= WARN_HOURS and hours_run < WARN_HOURS + 0.6: 
+        elif hours_run >= ROTATION_WARN_HOURS and hours_run < ROTATION_WARN_HOURS + 0.6:
             # Check inventory for next gen
             stock_liters = await inv_repo.get_stock()
-            stock_cans = stock_liters / 20.0
+            stock_cans = stock_liters / LITERS_PER_CAN
             fuel_status = f"Запас на складі: {stock_cans:.1f} каністр ({stock_liters}л)."
             if stock_cans < 1:
                 fuel_status += " ⚠️ МАЛО ПАЛИВА! Немає чим заправити наступний."

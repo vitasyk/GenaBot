@@ -1,4 +1,3 @@
-from datetime import datetime
 import html
 import logging
 from bot.database.repositories.generator import GeneratorRepository
@@ -7,6 +6,7 @@ from bot.database.models import Generator, GenStatus
 from bot.services.antigel import AntigelService
 from bot.services.weather import WeatherService
 from bot.services.notifier import NotifierService
+from bot.utils.clock import utcnow
 from redis.asyncio import Redis
 
 class GeneratorService:
@@ -102,7 +102,7 @@ class GeneratorService:
                 reports.append(await self._stop_and_calculate(g, user_id))
 
         # Start target
-        await self.repo.set_status(name, GenStatus.running, datetime.utcnow())
+        await self.repo.set_status(name, GenStatus.running, utcnow())
         await self.logs.log_action(user_id, "START_GEN", f"Started {name}")
 
         # Global Notification
@@ -165,7 +165,7 @@ class GeneratorService:
             await self.repo.set_status(gen.name, GenStatus.stopped)
             return None
 
-        now = datetime.utcnow()
+        now = utcnow()
         if now < gen.current_run_start:
             now = gen.current_run_start
             
@@ -245,7 +245,7 @@ class GeneratorService:
         if not gen.last_stop_at:
             return None
             
-        downtime_hours = (datetime.utcnow() - gen.last_stop_at).total_seconds() / 3600.0
+        downtime_hours = (utcnow() - gen.last_stop_at).total_seconds() / 3600.0
         temp = await self.weather.get_current_temperature()
         if temp is None:
             return None

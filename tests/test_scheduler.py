@@ -60,7 +60,7 @@ def test_start_scheduler_passes_shared_redis_to_jobs(monkeypatch):
 
 async def test_outage_job_uses_given_redis_without_new_connection(monkeypatch, fake_redis):
     import bot.scheduler as sched
-    import bot.services.session_service as session_service
+    from bot.services import session_service
 
     monkeypatch.setattr(sched.Redis, "from_url", MagicMock(side_effect=AssertionError("new connection")))
     session_cm = MagicMock(__aenter__=AsyncMock(return_value="session"), __aexit__=AsyncMock(return_value=None))

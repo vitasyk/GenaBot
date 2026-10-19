@@ -20,11 +20,11 @@ def test_unknown_temperature_uses_worst_case_factor():
 async def test_api_failure_returns_none_and_logs_without_key(caplog):
     weather = WeatherService()
     weather.api_key = "SECRET-KEY"
-    with patch("bot.services.weather.aiohttp.ClientSession",
-               side_effect=aiohttp.ClientError("https://x/weather?appid=SECRET-KEY")):
-        with caplog.at_level(logging.WARNING):
-            assert await weather.get_current_temperature() is None
-            assert await weather.get_weekly_forecast() == []
+    error = aiohttp.ClientError("https://x/weather?appid=SECRET-KEY")
+    with patch("bot.services.weather.aiohttp.ClientSession", side_effect=error), \
+            caplog.at_level(logging.WARNING):
+        assert await weather.get_current_temperature() is None
+        assert await weather.get_weekly_forecast() == []
 
     assert caplog.records
     assert "SECRET-KEY" not in caplog.text

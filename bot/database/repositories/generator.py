@@ -2,6 +2,7 @@ from datetime import datetime
 from sqlalchemy import select
 from bot.database.repositories.base import BaseRepository
 from bot.database.models import Generator, GenStatus
+from bot.utils.clock import utcnow
 
 class GeneratorRepository(BaseRepository[Generator]):
     def __init__(self, session):
@@ -39,7 +40,7 @@ class GeneratorRepository(BaseRepository[Generator]):
                 gen.current_run_start = start_time
             elif status == GenStatus.stopped:
                 gen.current_run_start = None
-                gen.last_stop_at = datetime.utcnow()
+                gen.last_stop_at = utcnow()
         return gen
 
     async def add_fuel(self, name: str, liters: float) -> float:

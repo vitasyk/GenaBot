@@ -1,6 +1,7 @@
 import logging
 
 import aiohttp
+
 from bot.config import config
 
 logger = logging.getLogger(__name__)

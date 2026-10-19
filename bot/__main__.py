@@ -58,7 +58,7 @@ async def main():
     dp.include_router(errors.router)  # global error handler: catches exceptions from every router
     
     # Start Scheduler
-    from bot.scheduler import scheduler, start_scheduler, restore_scheduler_settings
+    from bot.scheduler import restore_scheduler_settings, scheduler, start_scheduler
     start_scheduler(bot, redis_client)
     try:
         await restore_scheduler_settings(redis_client)
