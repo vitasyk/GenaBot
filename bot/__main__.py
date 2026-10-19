@@ -58,23 +58,17 @@ async def main():
     dp.include_router(errors.router)  # global error handler: catches exceptions from every router
     
     # Start Scheduler
-    from bot.scheduler import start_scheduler, restore_scheduler_settings
+    from bot.scheduler import scheduler, start_scheduler, restore_scheduler_settings
     start_scheduler(bot, redis_client)
-    await restore_scheduler_settings(redis_client)
-    
-    logging.info("Bot started and polling...")
-    
-    while True:
-        try:
-            await dp.start_polling(bot)
-        except asyncio.CancelledError:
-            logging.info("Bot stopped by user")
-            break
-        except Exception as e:
-            logging.error(f"Polling error: {e}. Restarting in 5 sec...")
-            await asyncio.sleep(5)
-    
-    await bot.session.close()
+    try:
+        await restore_scheduler_settings(redis_client)
+        logging.info("Bot started and polling...")
+        # aiogram retries network errors inside start_polling itself
+        await dp.start_polling(bot)
+    finally:
+        scheduler.shutdown(wait=False)
+        await bot.session.close()
+        await redis_client.aclose()
 
 if __name__ == "__main__":
     try:
