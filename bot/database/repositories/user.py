@@ -1,6 +1,20 @@
 from sqlalchemy import select
 from bot.database.repositories.base import BaseRepository
+from bot.config import config
 from bot.database.models import User, UserRole
+
+
+def resolve_role(user_id: int) -> UserRole:
+    """Role the current config grants (authoritative over the role stored in DB).
+
+    Read on every call: RESTRICT_ACCESS can be changed at runtime by admins.
+    """
+    if user_id in config.ADMIN_IDS:
+        return UserRole.admin
+    if not config.RESTRICT_ACCESS or user_id in config.ALLOWED_IDS:
+        return UserRole.worker
+    return UserRole.blocked
+
 
 class UserRepository(BaseRepository[User]):
     def __init__(self, session):
@@ -10,21 +24,7 @@ class UserRepository(BaseRepository[User]):
         return await self.session.get(User, user_id)
 
     async def create_or_update(self, user_id: int, name: str, role: UserRole = UserRole.worker) -> User:
-        # Check against config
-        from bot.config import config
-        
-        # Determine target role based on config (Authoritative source)
-        if user_id in config.ADMIN_IDS:
-            target_role = UserRole.admin
-        elif config.RESTRICT_ACCESS:
-            if user_id in config.ALLOWED_IDS:
-                target_role = UserRole.worker
-            else:
-                target_role = UserRole.blocked
-        else:
-             # Public access enabled
-             target_role = UserRole.worker
-            
+        target_role = resolve_role(user_id)
         user = await self.get_by_id(user_id)
         if not user:
             user = User(id=user_id, name=name, role=target_role)

@@ -6,7 +6,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message, TelegramObject
 
 from bot.database.models import UserRole
-from bot.database.repositories.user import UserRepository
+from bot.database.repositories.user import UserRepository, resolve_role
 
 ACCESS_DENIED_TEXT = "⛔ Доступ заборонено. Зверніться до адміністратора."
 
@@ -23,7 +23,7 @@ def _is_open_command(event: TelegramObject) -> bool:
 
 
 class AccessMiddleware(BaseMiddleware):
-    """Outer middleware for messages and callbacks: only DB users with role admin/worker pass.
+    """Outer middleware for messages and callbacks: only DB users whose config role is admin/worker pass.
 
     Needs `user_repo` in data, so DbSessionMiddleware must run first (it is on dp.update).
     """
@@ -40,6 +40,12 @@ class AccessMiddleware(BaseMiddleware):
         tg_user = data.get("event_from_user")
         user_repo: UserRepository = data["user_repo"]
         user = await user_repo.get_by_id(tg_user.id) if tg_user else None
+        if user:
+            role = resolve_role(user.id)
+            if user.role != role:
+                # Config changed since /start (revoked or granted): DbSessionMiddleware commits it
+                logging.info("Access role synced: user_id=%s %s -> %s", user.id, user.role, role)
+                user.role = role
         if user and user.role in ALLOWED_ROLES:
             return await handler(event, data)
 
