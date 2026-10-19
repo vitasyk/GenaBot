@@ -1,7 +1,8 @@
 import gspread
 from google.oauth2.service_account import Credentials
 from bot.config import config
-from datetime import datetime, date, timedelta
+from bot.utils.clock import now_local
+from datetime import date, timedelta
 from typing import Optional, List, Tuple
 import logging
 import re
@@ -148,7 +149,7 @@ class GoogleSheetsService:
         - Outage >= 19:00 (Evening)  -> Workers starting at 13:00, 15:00, 17:00, 20:00 on target_date
         """
         if target_date is None:
-            target_date = datetime.now().date()
+            target_date = now_local().date()
         
         # Map outage time to preferred shift start times
         if outage_start_hour < 7:  # Early morning outage (e.g. 02:00)
@@ -200,7 +201,7 @@ class GoogleSheetsService:
         Uses current month's worksheet.
         """
         try:
-            worksheet = self._get_worksheet(datetime.now().date())
+            worksheet = self._get_worksheet(now_local().date())
             # We only need the first column of the specified rows
             # Rows 4-60 (index 3-59)
             all_values = worksheet.get_all_values()
