@@ -87,13 +87,20 @@ class GeneratorService:
         return gen
 
     async def adjust_total_hours(self, user_id: int, gen_id: int, delta: float) -> Generator | None:
-        """Admin correction of run hours (forgotten start, mistaken entry); never below zero."""
+        """Admin correction of run hours (forgotten start, mistaken entry); never below zero.
+        Fuel follows at the base rate: added hours burn it, removed hours give it back (up to the tank)."""
         gen = await self.repo.get_by_id(gen_id)
         if gen:
-            old = gen.total_hours_run or 0.0
-            gen.total_hours_run = max(0.0, old + delta)
+            old_hours, old_fuel = gen.total_hours_run or 0.0, gen.fuel_level or 0.0
+            gen.total_hours_run = max(0.0, old_hours + delta)
+            fuel_delta = (gen.total_hours_run - old_hours) * gen.consumption_rate
+            gen.fuel_level = min(max(old_fuel - fuel_delta, 0.0), gen.tank_capacity)
+            # Same as a normal stop: burned fuel shrinks the untreated share proportionally
+            if fuel_delta > 0 and old_fuel > 0 and gen.fuel_since_antigel:
+                gen.fuel_since_antigel *= gen.fuel_level / old_fuel
             await self.logs.log_action(user_id, "ADJUST_HOURS",
-                                       f"{gen.name}: {delta:+.1f}h ({old:.1f}h -> {gen.total_hours_run:.1f}h)")
+                                       f"{gen.name}: {delta:+.1f}h ({old_hours:.1f}h -> {gen.total_hours_run:.1f}h), "
+                                       f"fuel {old_fuel:.1f}L -> {gen.fuel_level:.1f}L")
         return gen
 
     async def get_notify_start_status(self) -> bool:

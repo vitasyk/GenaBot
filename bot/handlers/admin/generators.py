@@ -172,7 +172,9 @@ async def admin_generator_hours_start(callback: types.CallbackQuery, callback_da
     await callback.message.edit_text(
         f"⏱ <b>Мотогодини {html.escape(gen.name)}</b>\n\n"
         f"Зараз: {gen.total_hours_run or 0.0:.1f} год.\n"
-        "Надішліть, скільки додати або відняти, напр. <code>+2.5</code> або <code>-1</code>.",
+        "Надішліть, скільки додати або відняти, напр. <code>+2.5</code> або <code>-1</code>.\n"
+        f"Паливо зміниться разом з годинами: {gen.consumption_rate:.1f} л за кожну годину "
+        "(додані години списують, відняті повертають).",
         reply_markup=_cancel_to_generators_kb(),
         parse_mode="HTML"
     )

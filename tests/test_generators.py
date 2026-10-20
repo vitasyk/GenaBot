@@ -217,15 +217,28 @@ async def test_refuel_error_is_reraised_for_rollback():
 # --- manual run-hours correction --------------------------------------------
 
 async def test_adjust_hours_adds_subtracts_and_never_goes_negative():
-    gen = _gen(5, "WILSON")
+    gen = _gen(5, "WILSON", tank_capacity=40.0)  # 20 L in tank, 2 L/h
     gen.total_hours_run = 10.0
     service = _service(MagicMock(get_by_id=AsyncMock(return_value=gen)))
 
     await service.adjust_total_hours(user_id=1, gen_id=5, delta=2.5)
     assert gen.total_hours_run == pytest.approx(12.5)
+    assert gen.fuel_level == pytest.approx(15.0)  # 2.5 h * 2 L/h burned
     await service.adjust_total_hours(user_id=1, gen_id=5, delta=-20)
     assert gen.total_hours_run == 0.0
+    assert gen.fuel_level == pytest.approx(40.0)  # only the 12.5 h really removed are returned, capped by tank
     assert service.logs.log_action.await_args.args[1] == "ADJUST_HOURS"
+
+
+async def test_adjust_hours_fuel_never_negative_and_shrinks_antigel_share():
+    gen = _gen(5, "WILSON", tank_capacity=40.0)
+    gen.fuel_since_antigel = 10.0
+    service = _service(MagicMock(get_by_id=AsyncMock(return_value=gen)))
+
+    await service.adjust_total_hours(user_id=1, gen_id=5, delta=5)  # 10 L of 20 L burned
+    assert gen.fuel_level == pytest.approx(10.0) and gen.fuel_since_antigel == pytest.approx(5.0)
+    await service.adjust_total_hours(user_id=1, gen_id=5, delta=100)
+    assert gen.fuel_level == 0.0 and gen.fuel_since_antigel == 0.0
 
 
 async def test_adjust_hours_input_parses_signed_delta():
