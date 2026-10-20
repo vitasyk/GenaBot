@@ -212,3 +212,43 @@ async def test_refuel_error_is_reraised_for_rollback():
     inventory_service.take_fuel.assert_awaited_once_with(1, 20)
     callback.message.answer.assert_awaited_once()
     callback.message.edit_text.assert_not_awaited()
+
+
+# --- manual run-hours correction --------------------------------------------
+
+async def test_adjust_hours_adds_subtracts_and_never_goes_negative():
+    gen = _gen(5, "WILSON")
+    gen.total_hours_run = 10.0
+    service = _service(MagicMock(get_by_id=AsyncMock(return_value=gen)))
+
+    await service.adjust_total_hours(user_id=1, gen_id=5, delta=2.5)
+    assert gen.total_hours_run == pytest.approx(12.5)
+    await service.adjust_total_hours(user_id=1, gen_id=5, delta=-20)
+    assert gen.total_hours_run == 0.0
+    assert service.logs.log_action.await_args.args[1] == "ADJUST_HOURS"
+
+
+async def test_adjust_hours_input_parses_signed_delta():
+    from bot.handlers.admin import generators as admin_generators
+    from bot.states import AdminStates
+
+    state = FSMContext(storage=MemoryStorage(), key=StorageKey(bot_id=1, chat_id=1, user_id=1))
+    gen = _gen(5, "WILSON", tank_capacity=40.0, instructions_media=None)
+    gen.total_hours_run = 3.5
+    svc = MagicMock(adjust_total_hours=AsyncMock(return_value=gen))
+
+    def msg(text):
+        m = MagicMock(text=text, answer=AsyncMock())
+        m.from_user.id = 1
+        return m
+
+    await state.set_state(AdminStates.waiting_for_gen_hours)
+    await state.update_data(gen_id=5)
+    bad = msg("abc")
+    await admin_generators.admin_generator_hours_input(bad, state, svc)
+    svc.adjust_total_hours.assert_not_awaited()
+    assert await state.get_state() == AdminStates.waiting_for_gen_hours.state  # admin can retry
+
+    await admin_generators.admin_generator_hours_input(msg("-1,5"), state, svc)
+    svc.adjust_total_hours.assert_awaited_once_with(1, 5, -1.5)
+    assert await state.get_state() is None

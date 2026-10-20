@@ -17,16 +17,18 @@ router = Router()
 GEN_NAME_MAX_LEN = 32
 SOS_TEXT_MAX_LEN = 3500  # leaves room for the title within Telegram's 4096 limit
 SOS_MEDIA_MAX = 10  # Telegram sends at most 10 files in one album
+HOURS_DELTA_MAX = 1000
 _admin_only = F.from_user.id.in_(config.ADMIN_IDS)
 _GEN_INPUT_STATES = {
     AdminStates.waiting_for_gen_name.state,
     AdminStates.waiting_for_gen_instructions.state,
     AdminStates.waiting_for_gen_media.state,
+    AdminStates.waiting_for_gen_hours.state,
 }
 
 
 class AdminGenCb(CallbackData, prefix="adm_gen"):
-    action: str  # view, toggle, sos, media, media_clear
+    action: str  # view, toggle, sos, media, media_clear, hours
     id: int
 
 
@@ -52,6 +54,7 @@ def _generator_details(gen) -> tuple[str, types.InlineKeyboardMarkup]:
     text += f"⚡ <b>Статус:</b> {gen.status.value}\n"
     text += f"⛽ <b>Залишок:</b> {gen.fuel_level:.1f} л (бак {gen.tank_capacity:.1f} л)\n"
     text += f"📉 <b>Споживання:</b> {gen.consumption_rate:.1f} л/год\n"
+    text += f"⏱ <b>Напрацювання:</b> {gen.total_hours_run or 0.0:.1f} год\n"
     media_count = len(gen.instructions_media or [])
     text += f"🆘 <b>Інструкція SOS:</b> {'додано' if gen.instructions else 'не додано'}"
     text += f", вкладень: {media_count}"
@@ -59,6 +62,7 @@ def _generator_details(gen) -> tuple[str, types.InlineKeyboardMarkup]:
     builder = InlineKeyboardBuilder()
     toggle_text = "⛔ Вимкнути" if gen.is_active else "✅ Увімкнути"
     builder.row(InlineKeyboardButton(text=toggle_text, callback_data=AdminGenCb(action="toggle", id=gen.id).pack()))
+    builder.row(InlineKeyboardButton(text="⏱ Мотогодини", callback_data=AdminGenCb(action="hours", id=gen.id).pack()))
     builder.row(InlineKeyboardButton(text="📝 Інструкція SOS", callback_data=AdminGenCb(action="sos", id=gen.id).pack()))
     builder.row(InlineKeyboardButton(text="📎 Фото / PDF", callback_data=AdminGenCb(action="media", id=gen.id).pack()))
     if media_count:
@@ -155,6 +159,47 @@ async def admin_generator_sos_input(message: types.Message, state: FSMContext, g
         return
     text, kb = _generator_details(gen)
     await message.answer("✅ Інструкцію збережено!\n\n" + text, reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(_admin_only, AdminGenCb.filter(F.action == "hours"))
+async def admin_generator_hours_start(callback: types.CallbackQuery, callback_data: AdminGenCb, state: FSMContext, generator_service: GeneratorService):
+    gen = await generator_service.get_by_id(callback_data.id)
+    if not gen:
+        await callback.answer("Генератор не знайдено", show_alert=True)
+        return
+    await state.set_state(AdminStates.waiting_for_gen_hours)
+    await state.update_data(gen_id=gen.id)
+    await callback.message.edit_text(
+        f"⏱ <b>Мотогодини {html.escape(gen.name)}</b>\n\n"
+        f"Зараз: {gen.total_hours_run or 0.0:.1f} год.\n"
+        "Надішліть, скільки додати або відняти, напр. <code>+2.5</code> або <code>-1</code>.",
+        reply_markup=_cancel_to_generators_kb(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.message(_admin_only, AdminStates.waiting_for_gen_hours)
+async def admin_generator_hours_input(message: types.Message, state: FSMContext, generator_service: GeneratorService):
+    if _is_menu_or_command(message):
+        await state.clear()
+        await message.answer("❌ Скасовано. Оберіть пункт меню ще раз.")
+        return
+    try:
+        delta = float((message.text or "").strip().replace(",", "."))
+    except ValueError:
+        delta = 0.0
+    if not 0 < abs(delta) <= HOURS_DELTA_MAX:  # also rejects nan/inf
+        await message.answer(f"⚠️ Введіть число годин, напр. +2.5 або -1 (до {HOURS_DELTA_MAX}).")
+        return
+
+    gen = await generator_service.adjust_total_hours(message.from_user.id, (await state.get_data()).get("gen_id"), delta)
+    await state.clear()
+    if not gen:
+        await message.answer("❌ Генератор не знайдено.")
+        return
+    text, kb = _generator_details(gen)
+    await message.answer(f"✅ Мотогодини змінено на {delta:+.1f} год.\n\n" + text, reply_markup=kb, parse_mode="HTML")
 
 
 @router.callback_query(_admin_only, AdminGenCb.filter(F.action == "media"))

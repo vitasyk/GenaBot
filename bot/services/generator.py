@@ -86,6 +86,16 @@ class GeneratorService:
             await self.logs.log_action(user_id, "UPDATE_SOS", f"Removed SOS attachments of {gen.name}")
         return gen
 
+    async def adjust_total_hours(self, user_id: int, gen_id: int, delta: float) -> Generator | None:
+        """Admin correction of run hours (forgotten start, mistaken entry); never below zero."""
+        gen = await self.repo.get_by_id(gen_id)
+        if gen:
+            old = gen.total_hours_run or 0.0
+            gen.total_hours_run = max(0.0, old + delta)
+            await self.logs.log_action(user_id, "ADJUST_HOURS",
+                                       f"{gen.name}: {delta:+.1f}h ({old:.1f}h -> {gen.total_hours_run:.1f}h)")
+        return gen
+
     async def get_notify_start_status(self) -> bool:
         """Check if global start notifications are enabled"""
         val = await self.redis.get(self.NOTIFY_KEY)
