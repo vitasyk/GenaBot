@@ -26,6 +26,32 @@ SOS_NO_INSTRUCTIONS = (
     "Інструкцію ще не додано. Адміністратор може додати її в адмін-панелі → ⚙️ Генератори."
 )
 
+
+
+def refuel_instructions_text() -> str:
+    from bot.config import config
+    from bot.services.antigel import SAFETY_MARGIN_C
+    dose = config.ANTIGEL_ML_PER_LITER
+    threshold = config.FUEL_CFPP_C + SAFETY_MARGIN_C  # same rule as the reminders
+    return (
+        "⛽ <b>Як заправляти генератор</b>\n\n"
+        "1. Зупиніть генератор і дайте 5–10 хв охолонути. Не паліть і не заправляйте біля іскор.\n"
+        "2. Візьміть чисту каністру й лійку з сіточкою. Витріть горловину бака від бруду й снігу.\n"
+        "3. Взимку спершу влийте антигель (див. нижче), потім паливо — так вони перемішаються.\n"
+        "4. Заливайте повільно і не під горло: лишіть ~5% бака (≈8 л зі 170 л).\n"
+        "5. Щільно закрийте кришку, витріть розлите паливо.\n"
+        "6. Запишіть заправку в боті: «⛽ Заправити».\n\n"
+        "❄️ <b>Антигель (зимова присадка)</b>\n"
+        f"• Додавайте, коли нічний прогноз <b>{threshold:+.0f} °C і нижче</b>. Присадка працює, тільки якщо влита "
+        "до того, як паливо почне мутніти від холоду. Загуслому паливу вона вже не допоможе — тоді генератор "
+        "треба прогріти.\n"
+        f"• Дозування: <b>{dose:g} мл на 1 л</b> палива. Повний бак 170 л — {170 * dose:g} мл, "
+        f"каністра 20 л — {20 * dose:g} мл. Якщо на етикетці вашої присадки інше — орієнтуйтеся на етикетку.\n"
+        "• Після заправки запустіть генератор на кілька хвилин, щоб присадка розійшлася по системі.\n"
+        "• Позначте в боті «✅ Присадку додано», коли бот нагадає."
+    )
+
+
 @router.message(CommandStart())
 @router.message(Command("menu"))
 @router.message(Command("help"))
@@ -60,6 +86,12 @@ async def sos_handler(message: types.Message, generator_service: GeneratorServic
 async def sos_menu_callback(callback: types.CallbackQuery, generator_service: GeneratorService):
     gens = await generator_service.get_status()
     await callback.message.edit_text(SOS_MENU_TEXT, reply_markup=get_sos_kb(gens), parse_mode="HTML")
+    await callback.answer()
+
+@router.callback_query(F.data == "sos_refuel")
+async def sos_refuel_instructions(callback: types.CallbackQuery):
+    back = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="sos_menu")]])
+    await callback.message.edit_text(refuel_instructions_text(), reply_markup=back, parse_mode="HTML")
     await callback.answer()
 
 @router.callback_query(GenCb.filter(F.action == "sos"))

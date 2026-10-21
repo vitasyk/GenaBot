@@ -15,7 +15,9 @@ from bot.keyboards.inline_kb import (
 )
 from bot.keyboards.main_kb import MENU_BUTTONS
 from bot.services.generator import GeneratorService
+from bot.services.maintenance import format_status, maintenance_status
 from bot.states import GenStates
+from bot.utils.clock import now_local
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +95,9 @@ async def _get_status_panel(generator_service: GeneratorService, with_keyboard: 
              text += f"   💤 <b>Очікуваний час роботи:</b> ~{hours_left:.1f} год\n"
              
         text += f"   📊 <b>Всього відпрацьовано:</b> {g.total_hours_run or 0.0:.1f} год\n"
+        maint = maintenance_status(g, now_local().date())
+        if maint:
+            text += f"   {format_status(maint)}\n"
         text += f"   📉 <b>Споживання:</b> {rate:.1f} л/год\n"
         # Warming recommendation
         warm_rec = await generator_service.get_warming_recommendation(g.name)

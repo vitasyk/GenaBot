@@ -1,5 +1,6 @@
 import html
 import logging
+from datetime import datetime
 
 from redis.asyncio import Redis
 
@@ -101,6 +102,21 @@ class GeneratorService:
             await self.logs.log_action(user_id, "ADJUST_HOURS",
                                        f"{gen.name}: {delta:+.1f}h ({old_hours:.1f}h -> {gen.total_hours_run:.1f}h), "
                                        f"fuel {old_fuel:.1f}L -> {gen.fuel_level:.1f}L")
+        return gen
+
+    async def set_maintenance(self, user_id: int, gen_id: int, done_at: datetime, hours: float) -> Generator | None:
+        """Record a service: done_at is naive UTC, hours is total_hours_run at that moment."""
+        gen = await self.repo.get_by_id(gen_id)
+        if gen:
+            gen.last_maintenance, gen.maint_hours_at = done_at, hours
+            await self.logs.log_action(user_id, "MAINTENANCE_DONE", f"{gen.name}: {done_at:%Y-%m-%d}, at {hours:.1f}h")
+        return gen
+
+    async def set_maintenance_interval(self, user_id: int, gen_id: int, hours: float, months: int) -> Generator | None:
+        gen = await self.repo.get_by_id(gen_id)
+        if gen:
+            gen.maint_interval_hours, gen.maint_interval_months = hours, months
+            await self.logs.log_action(user_id, "MAINT_INTERVAL", f"{gen.name}: every {hours:g}h or {months} months")
         return gen
 
     async def get_notify_start_status(self) -> bool:

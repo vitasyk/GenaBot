@@ -22,7 +22,7 @@ from bot.services.weather import WeatherService
 from bot.utils.clock import now_local
 
 # Add the additive while the forecast minimum is still this far above the fuel's CFPP
-SAFETY_MARGIN_C = 5.0
+SAFETY_MARGIN_C = 10.0
 # Remind when this share of the tank is untreated fuel (protection drops below ~80%)
 UNTREATED_SHARE = 0.2
 FORECAST_DAYS = 3

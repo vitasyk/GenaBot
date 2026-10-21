@@ -12,9 +12,9 @@ JULY, JANUARY = date(2026, 7, 1), date(2026, 1, 15)
 
 
 def test_needed_only_when_cold_forecast_and_enough_untreated_fuel():
-    # summer diesel (CFPP -5) + 5 °C margin: the additive must go in from a 0 °C forecast
-    assert advise(90, 120, forecast_min=-1, current_temp=3, today=JULY).needed
-    assert not advise(90, 120, forecast_min=4, current_temp=8, today=JANUARY).needed  # warm forecast wins
+    # summer diesel (CFPP -5) + 10 °C margin: the additive must go in from a +5 °C forecast
+    assert advise(90, 120, forecast_min=4, current_temp=8, today=JULY).needed
+    assert not advise(90, 120, forecast_min=6, current_temp=8, today=JANUARY).needed  # warm forecast wins
     assert not advise(10, 120, forecast_min=-15, current_temp=-3, today=JANUARY).needed  # 8% untreated
 
 

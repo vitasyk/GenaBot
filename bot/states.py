@@ -25,6 +25,9 @@ class AdminStates(StatesGroup):
     waiting_for_gen_instructions = State()
     waiting_for_gen_media = State()
     waiting_for_gen_hours = State()
+    waiting_for_maint_date = State()
+    waiting_for_maint_hours = State()
+    waiting_for_maint_interval = State()
 
 class ScheduleStates(StatesGroup):
     """States for manual schedule entry"""

@@ -70,4 +70,5 @@ def get_start_generator_kb(gens: Sequence[Generator]) -> InlineKeyboardMarkup:
 
 
 def get_sos_kb(gens: Sequence[Generator]) -> InlineKeyboardMarkup:
-    return get_generator_pick_kb(gens, "sos")
+    refuel = InlineKeyboardButton(text="⛽ Як заправляти + антигель", callback_data="sos_refuel")
+    return get_generator_pick_kb(gens, "sos", footer=refuel)

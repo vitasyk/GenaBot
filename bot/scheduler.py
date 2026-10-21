@@ -16,9 +16,10 @@ from bot.database.models import Generator, GenStatus
 from bot.database.repositories.generator import GeneratorRepository
 from bot.database.repositories.inventory import InventoryRepository
 from bot.services.inventory import LITERS_PER_CAN
+from bot.services.maintenance import format_status, maintenance_status
 from bot.services.notifier import NotifierService
 from bot.services.weather import WeatherService
-from bot.utils.clock import utcnow
+from bot.utils.clock import now_local, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +27,7 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler(timezone=zoneinfo.ZoneInfo(config.TIMEZONE))
 
 DEFAULT_OUTAGE_CHECK_MINUTES = 1
-MAINTENANCE_INTERVAL_HOURS = 100
-MAINTENANCE_MARK_KEY = "maintenance:last_mark:{gen_id}"
+MAINTENANCE_NOTIFIED_KEY = "maintenance:notified:{gen_id}"
 # Continuous run hours: recommend switching / demand switching to another generator
 ROTATION_WARN_HOURS = 4
 ROTATION_CRITICAL_HOURS = 6
@@ -100,25 +100,24 @@ async def check_rotation_needed(bot: Bot):
             await notifier.notify_all(msg)
 
 async def notify_maintenance_due(gens: Sequence[Generator], redis: Redis, notifier: NotifierService) -> None:
-    """Alert once each time a generator's total hours cross a new MAINTENANCE_INTERVAL_HOURS mark.
+    """Alert once when maintenance gets close ("soon") and once when it is due.
 
-    The last notified mark per generator lives in Redis. With no stored mark (first run)
-    the current one is stored silently, so old marks don't trigger alerts.
+    Redis stores "<last service time>:<level>" per generator, so a newly recorded service starts over.
+    Generators without a recorded service are skipped.
     """
+    today = now_local().date()
     for g in gens:
-        total = g.total_hours_run or 0.0
-        mark = int(total // MAINTENANCE_INTERVAL_HOURS)
-        key = MAINTENANCE_MARK_KEY.format(gen_id=g.id)
-        stored = await redis.get(key)
-        last_mark = int(stored) if stored is not None else None
-        if last_mark == mark:
+        st = maintenance_status(g, today)
+        if st is None:
             continue
-        await redis.set(key, mark)
-        if last_mark is not None and mark > last_mark:
-            await notifier.notify_all(
-                f"🔧 <b>ТЕХНІЧНЕ ОБСЛУГОВУВАННЯ</b>\nГенератор {html.escape(g.name)} "
-                f"відпрацював {total:.1f} год.\nЧас перевірити масло!"
-            )
+        key = MAINTENANCE_NOTIFIED_KEY.format(gen_id=g.id)
+        value = f"{g.last_maintenance.isoformat()}:{st.level}"
+        stored = await redis.get(key)
+        if st.level == "ok" or (stored is not None and stored.decode() == value):
+            continue
+        await redis.set(key, value)
+        title = "🛑 <b>ПОТРІБНЕ ТЕХОБСЛУГОВУВАННЯ</b>" if st.level == "due" else "⚠️ <b>Техобслуговування скоро</b>"
+        await notifier.notify_all(f"{title}\nГенератор {html.escape(g.name)}\n{format_status(st)}")
 
 
 async def check_maintenance_needed(bot: Bot, redis: Redis):

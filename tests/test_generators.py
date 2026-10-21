@@ -50,7 +50,7 @@ def test_refuel_and_sos_kb_list_only_given_generators():
     assert refuel.inline_keyboard[-1][0].callback_data == "refuel_close"
 
     sos = get_sos_kb(gens)
-    assert _callbacks(sos) == [GenCb(action="sos", id=3).pack()]
+    assert _callbacks(sos) == [GenCb(action="sos", id=3).pack(), "sos_refuel"]
 
 
 def test_selection_kb_marks_selected_names():
@@ -246,7 +246,8 @@ async def test_adjust_hours_input_parses_signed_delta():
     from bot.states import AdminStates
 
     state = FSMContext(storage=MemoryStorage(), key=StorageKey(bot_id=1, chat_id=1, user_id=1))
-    gen = _gen(5, "WILSON", tank_capacity=40.0, instructions_media=None)
+    gen = _gen(5, "WILSON", tank_capacity=40.0, instructions_media=None,
+               maint_interval_hours=200.0, maint_interval_months=12)
     gen.total_hours_run = 3.5
     svc = MagicMock(adjust_total_hours=AsyncMock(return_value=gen))
 

@@ -76,6 +76,9 @@ class Generator(Base):
     consumption_rate: Mapped[float] = mapped_column(Float, default=2.0)
     total_hours_run: Mapped[float] = mapped_column(Float, default=0.0)
     last_maintenance: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    maint_hours_at: Mapped[float | None] = mapped_column(Float, nullable=True)  # total_hours_run at last service
+    maint_interval_hours: Mapped[float] = mapped_column(Float, default=200.0, server_default="200")
+    maint_interval_months: Mapped[int] = mapped_column(Integer, default=12, server_default="12")
     fuel_since_antigel: Mapped[float] = mapped_column(Float, default=0.0)
     last_stop_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
