@@ -52,8 +52,11 @@ class ScheduleParser:
                 logger.exception(f"Failed to read schedule from cache ({day})")
         return None
 
-    async def get_schedules_data(self) -> list[tuple[datetime, bytes]]:
-        """Scrape the site and download schedule images for today and tomorrow: [(date, image_bytes)]"""
+    async def get_schedules_data(self) -> list[tuple[datetime, bytes]] | None:
+        """Scrape the site and download schedule images for today and tomorrow: [(date, image_bytes)].
+
+        [] means the page loaded but has no schedule published; None means HOE could not be reached.
+        """
         try:
             ssl_context = ssl.create_default_context(cafile=certifi.where())
             connector = aiohttp.TCPConnector(ssl=ssl_context)
@@ -63,7 +66,7 @@ class ScheduleParser:
                 async with session.get(config.HOE_SCHEDULE_URL) as response:
                     if response.status != 200:
                         logger.error(f"Failed to load HOE page: {response.status}")
-                        return []
+                        return None
                     html = await response.text()
 
                 today = now_local().date()
@@ -106,4 +109,4 @@ class ScheduleParser:
             return [(datetime.combine(d, time.min), b) for d, b in found.items()]
         except Exception:
             logger.exception("Error fetching schedules")
-            return []
+            return None

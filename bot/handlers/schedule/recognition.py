@@ -85,11 +85,18 @@ async def process_hoe_download_callback(callback: CallbackQuery, state: FSMConte
         await _send_cached_schedule(callback, target_date, label, "⚠️ <b>Сайт HOE недоступний (таймаут)</b>")
         return
 
+    if results is None:
+        await _send_cached_schedule(callback, target_date, label, "❌ <b>Не вдалося завантажити графік з HOE</b>")
+        return
+    if not results:
+        await callback.message.edit_text(
+            "ℹ️ <b>На сайті HOE зараз немає опублікованого графіка</b>\n\n"
+            "Відключень за графіком не заплановано. Якщо графік з'явиться, спробуйте ще раз.",
+            parse_mode="HTML"
+        )
+        return
     img_bytes = next((b for d, b in results if d.date() == target_date), None)
     if not img_bytes:
-        if not results:
-            await _send_cached_schedule(callback, target_date, label, "❌ <b>Не вдалося завантажити графік з HOE</b>")
-            return
         await callback.message.edit_text(
             f"⚠️ <b>Графіку на {label} ({target_date.strftime('%d.%m')}) ще немає</b>\n\n"
             "На сайті HOE поки що не опубліковано відповідний графік.\n"
