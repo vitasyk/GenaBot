@@ -1,6 +1,7 @@
 import logging
 
 from aiogram import Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import ErrorEvent
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,14 @@ async def on_error(event: ErrorEvent) -> bool:
     message, callback = update.message, update.callback_query
     source = message or callback
     user_id = source.from_user.id if source and source.from_user else None
+    if isinstance(event.exception, TelegramBadRequest) and "message is not modified" in str(event.exception):
+        # Same button pressed twice: the screen is already up to date, nothing to report
+        if callback:
+            try:
+                await callback.answer()
+            except Exception:
+                logger.debug("Failed to answer callback", exc_info=True)
+        return True
     logger.exception("Unhandled error in update %s (user_id=%s): %r", update.update_id, user_id,
                      event.exception, exc_info=event.exception)
     try:

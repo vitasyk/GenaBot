@@ -70,3 +70,17 @@ async def test_dispatcher_routes_errors_from_other_routers():
 
     method = bot.session.await_args.args[1]
     assert isinstance(method, SendMessage) and method.text == errors.ERROR_TEXT
+
+
+async def test_message_not_modified_is_ignored_quietly(caplog):
+    from aiogram.exceptions import TelegramBadRequest
+    callback = MagicMock(answer=AsyncMock())
+    callback.from_user.id = 7
+    exc = TelegramBadRequest(method=MagicMock(), message="Bad Request: message is not modified: specified new message content")
+    event = ErrorEvent.model_construct(update=MagicMock(update_id=10, message=None, callback_query=callback), exception=exc)
+
+    with caplog.at_level(logging.ERROR):
+        assert await on_error(event) is True
+
+    callback.answer.assert_awaited_once_with()  # just stop the button spinner, no alert
+    assert "Unhandled error" not in caplog.text
