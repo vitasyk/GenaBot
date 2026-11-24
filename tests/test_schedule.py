@@ -9,7 +9,7 @@ from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.config import config
-from bot.handlers.schedule import _common, manual, queue
+from bot.handlers.schedule import manual, queue
 from bot.scheduler import restore_runtime_settings
 from bot.services.schedule_recognizer import (
     RecognizedSchedule,
@@ -41,8 +41,9 @@ def test_now_local_is_kyiv_time_not_container_utc():
 
 
 def test_hours_to_ranges():
-    assert _common._hours_to_ranges([15, 14, 22, 23, 3]) == [(3, 4), (14, 16), (22, 24)]
-    assert _common._hours_to_ranges([]) == []
+    from bot.services.hoe_schedule import hours_to_ranges
+    assert hours_to_ranges([15, 14, 22, 23, 3]) == [(3, 4), (14, 16), (22, 24)]
+    assert hours_to_ranges([]) == []
 
 
 async def test_date_after_photo_goes_straight_to_confirmation():

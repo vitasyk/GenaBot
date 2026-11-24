@@ -25,6 +25,7 @@ async def test_hoe_button_never_shows_another_days_cached_image(monkeypatch, tmp
     (tmp_path / "schedule_tomorrow.png").write_bytes(b"feb-image")
     parser = ScheduleParser()
     monkeypatch.setattr(recognition, "parser", parser)
+    monkeypatch.setattr(parser, "fetch_page", AsyncMock(return_value="<html></html>"))  # no text schedule
     monkeypatch.setattr(parser, "get_schedules_data", AsyncMock(return_value=[]))  # HOE has no images today
 
     callback = MagicMock(data="hoe_today", answer=AsyncMock())
@@ -52,6 +53,7 @@ async def test_no_published_schedule_is_not_reported_as_failure(monkeypatch, tmp
     parser = ScheduleParser()
     parser._save_to_cache(b"old-image", now_local().date())  # downloaded earlier today
     monkeypatch.setattr(recognition, "parser", parser)
+    monkeypatch.setattr(parser, "fetch_page", AsyncMock(return_value="<html></html>"))  # no text schedule
     monkeypatch.setattr(parser, "get_schedules_data", AsyncMock(return_value=[]))  # page loaded, no images
     callback = _hoe_callback()
 
@@ -72,7 +74,8 @@ async def test_hoe_unreachable_falls_back_to_cached_image(monkeypatch, tmp_path)
     parser = ScheduleParser()
     parser._save_to_cache(b"today-image", now_local().date())
     monkeypatch.setattr(recognition, "parser", parser)
-    monkeypatch.setattr(parser, "get_schedules_data", AsyncMock(return_value=None))  # site down
+    monkeypatch.setattr(parser, "fetch_page", AsyncMock(return_value=None))  # site down
+    monkeypatch.setattr(parser, "get_schedules_data", AsyncMock(return_value=None))
     callback = _hoe_callback()
 
     await recognition.process_hoe_download_callback(callback, MagicMock())

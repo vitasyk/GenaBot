@@ -6,13 +6,9 @@ from aiogram.types import Message
 
 from bot.config import config
 from bot.keyboards.schedule_kb import get_confirm_kb
+from bot.services.hoe_schedule import format_ranges as _format_ranges
 from bot.states import ScheduleStates
 
-
-def _format_ranges(ranges: list[tuple[int, int]]) -> str:
-    if not ranges:
-        return "• відключень немає"
-    return "\n".join(f"• {s:02d}:00 - {e:02d}:00" for s, e in ranges)
 
 async def _ask_save_confirmation(message: Message, state: FSMContext, target_date: date, periods: list[tuple[int, int]]):
     """Shows the periods to save and waits for ✅/❌ (handled by confirm_schedule)."""
@@ -27,18 +23,3 @@ async def _ask_save_confirmation(message: Message, state: FSMContext, target_dat
         reply_markup=get_confirm_kb(),
         parse_mode="HTML"
     )
-
-def _hours_to_ranges(hours: list[int]) -> list[tuple[int, int]]:
-    """Convert list of hours to list of (start, end) ranges"""
-    if not hours:
-        return []
-
-    hours = sorted(hours)
-    ranges = []
-    start = hours[0]
-    for i in range(1, len(hours)):
-        if hours[i] != hours[i-1] + 1:
-            ranges.append((start, hours[i-1] + 1))
-            start = hours[i]
-    ranges.append((start, hours[-1] + 1))
-    return ranges

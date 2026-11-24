@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     
     # Energy Schedule Parser
     HOE_SCHEDULE_URL: str = "https://hoe.com.ua/page/pogodinni-vidkljuchennja"
-    QUEUE_NUMBER: str = "1.1"  # Which queue to monitor; admins change it in "📉 Графік"
+    QUEUE_NUMBER: str = "2.1"  # Which queue to monitor; admins change it in "📉 Графік"
 
     # Schedule image recognition (Claude)
     ANTHROPIC_API_KEY: SecretStr | None = None

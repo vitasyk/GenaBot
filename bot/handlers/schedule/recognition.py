@@ -10,12 +10,10 @@ from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
 from bot.config import config
 from bot.database.repositories.user import UserRepository
-from bot.handlers.schedule._common import (
-    _ask_save_confirmation,
-    _format_ranges,
-    _hours_to_ranges,
-)
+from bot.handlers.schedule._common import _ask_save_confirmation, _format_ranges
 from bot.keyboards.schedule_kb import get_date_quick_kb, get_schedule_menu_kb
+from bot.services.hoe_schedule import hours_to_ranges as _hours_to_ranges
+from bot.services.hoe_schedule import parse_hoe_page
 from bot.services.schedule_parser import ScheduleParser
 from bot.services.schedule_recognizer import (
     ScheduleRecognitionError,
@@ -69,7 +67,7 @@ async def _send_cached_schedule(callback: CallbackQuery, target_date: date, labe
 
 @router.callback_query(F.data.in_({"hoe_today", "hoe_tomorrow"}))
 async def process_hoe_download_callback(callback: CallbackQuery, state: FSMContext):
-    """Download the HOE image for the chosen day, recognize it with Claude, offer admins to save it"""
+    """Show HOE's text schedule for the chosen day; for an image, recognize it with Claude and offer admins to save it"""
     today = now_local().date()
     is_today = callback.data == "hoe_today"
     target_date = today if is_today else today + timedelta(days=1)
@@ -77,6 +75,20 @@ async def process_hoe_download_callback(callback: CallbackQuery, state: FSMConte
 
     await callback.answer()  # Answer immediately to prevent Telegram timeout
     await callback.message.edit_text(f"🔍 <b>Шукаю графік на {label}...</b>", parse_mode="HTML")
+
+    # HOE publishes the schedule as text now; the image path below is the fallback for the old format
+    page = await parser.fetch_page()
+    queues = parse_hoe_page(page, today).get(target_date) if page else None
+    if queues is not None:
+        periods = _hours_to_ranges(queues.get(config.QUEUE_NUMBER, set()))
+        await callback.message.edit_text(
+            f"📄 <b>Графік HOE на {label} ({target_date.strftime('%d.%m')})</b>\n"
+            f"Черга {html.escape(config.QUEUE_NUMBER)}:\n{_format_ranges(periods)}\n\n"
+            "<i>Бот сам зберігає графік і повідомляє про зміни.</i>",
+            parse_mode="HTML"
+        )
+        logger.info(f"User {callback.from_user.id} viewed HOE text schedule for {target_date}")
+        return
 
     try:
         results = await asyncio.wait_for(parser.get_schedules_data(), timeout=30.0)

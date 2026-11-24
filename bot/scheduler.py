@@ -3,6 +3,7 @@ import json
 import logging
 import zoneinfo
 from collections.abc import Sequence
+from datetime import datetime
 
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -15,18 +16,23 @@ from bot.database.main import session_maker
 from bot.database.models import Generator, GenStatus
 from bot.database.repositories.generator import GeneratorRepository
 from bot.database.repositories.inventory import InventoryRepository
+from bot.database.repositories.schedule import ScheduleRepository
+from bot.services.hoe_schedule import parse_hoe_page, sync_queue_schedule
 from bot.services.inventory import LITERS_PER_CAN
 from bot.services.maintenance import format_status, maintenance_status
 from bot.services.notifier import NotifierService
+from bot.services.schedule_parser import ScheduleParser
 from bot.services.weather import WeatherService
 from bot.utils.clock import now_local, utcnow
 
 logger = logging.getLogger(__name__)
 
 # Initialize scheduler with configured timezone
-scheduler = AsyncIOScheduler(timezone=zoneinfo.ZoneInfo(config.TIMEZONE))
+TZ = zoneinfo.ZoneInfo(config.TIMEZONE)
+scheduler = AsyncIOScheduler(timezone=TZ)
 
 DEFAULT_OUTAGE_CHECK_MINUTES = 1
+HOE_MONITOR_MINUTES = 5
 MAINTENANCE_NOTIFIED_KEY = "maintenance:notified:{gen_id}"
 # Continuous run hours: recommend switching / demand switching to another generator
 ROTATION_WARN_HOURS = 4
@@ -159,6 +165,16 @@ async def check_power_outage_job(bot: Bot, redis: Redis):
         service = SessionService(session, bot=bot, redis=redis)
         await service.check_power_outage()
 
+async def hoe_monitor_job(bot: Bot, redis: Redis):
+    """Watch the HOE page: save and announce new or changed hours for the selected queue."""
+    page = await ScheduleParser().fetch_page()
+    if page is None:
+        return
+    today = now_local().date()
+    async with session_maker() as session:
+        await sync_queue_schedule(parse_hoe_page(page, today), config.QUEUE_NUMBER, today, redis,
+                                  ScheduleRepository(session), NotifierService(bot))
+
 async def warming_check_job(bot: Bot, redis: Redis):
     from bot.database.repositories.generator import GeneratorRepository
     from bot.database.repositories.logs import LogRepository
@@ -197,6 +213,9 @@ def start_scheduler(bot: Bot, redis: Redis):
         id="check_power_outage_job",
         replace_existing=True
     )
+
+    scheduler.add_job(hoe_monitor_job, IntervalTrigger(minutes=HOE_MONITOR_MINUTES), args=[bot, redis],
+                      next_run_time=datetime.now(TZ))  # first check right at startup
 
     scheduler.start()
 

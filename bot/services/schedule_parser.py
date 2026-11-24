@@ -52,23 +52,36 @@ class ScheduleParser:
                 logger.exception(f"Failed to read schedule from cache ({day})")
         return None
 
+    @staticmethod
+    def _session() -> aiohttp.ClientSession:
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+        return aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=ssl_context),
+            timeout=aiohttp.ClientTimeout(total=20, connect=10),
+        )
+
+    async def fetch_page(self) -> str | None:
+        """HTML of the HOE outage page, None if HOE could not be reached."""
+        try:
+            async with self._session() as session, session.get(config.HOE_SCHEDULE_URL) as response:
+                if response.status != 200:
+                    logger.warning(f"Failed to load HOE page: {response.status}")
+                    return None
+                return await response.text()
+        except (aiohttp.ClientError, TimeoutError):
+            logger.warning("HOE page unreachable", exc_info=True)
+            return None
+
     async def get_schedules_data(self) -> list[tuple[datetime, bytes]] | None:
         """Scrape the site and download schedule images for today and tomorrow: [(date, image_bytes)].
 
-        [] means the page loaded but has no schedule published; None means HOE could not be reached.
+        [] means the page loaded but has no schedule image; None means HOE could not be reached.
         """
+        html = await self.fetch_page()
+        if html is None:
+            return None
         try:
-            ssl_context = ssl.create_default_context(cafile=certifi.where())
-            connector = aiohttp.TCPConnector(ssl=ssl_context)
-            timeout = aiohttp.ClientTimeout(total=20, connect=10)
-
-            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-                async with session.get(config.HOE_SCHEDULE_URL) as response:
-                    if response.status != 200:
-                        logger.error(f"Failed to load HOE page: {response.status}")
-                        return None
-                    html = await response.text()
-
+            async with self._session() as session:
                 today = now_local().date()
                 tomorrow = today + timedelta(days=1)
                 # Filenames/alt texts contain dates like 20260205 or 05.02.26
