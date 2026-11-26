@@ -49,7 +49,10 @@ class GeneratorRepository(BaseRepository[Generator]):
     async def add_fuel(self, name: str, liters: float) -> float:
         gen = await self.get_by_name(name, for_update=True)
         if gen:
-            gen.fuel_level += liters
+            level = gen.fuel_level + liters
+            if liters > 0:
+                level = min(level, gen.tank_capacity)  # refuel can't overfill the tank
+            gen.fuel_level = max(level, 0.0)  # burning can't go below empty
             return gen.fuel_level
         return 0
 
@@ -66,13 +69,6 @@ class GeneratorRepository(BaseRepository[Generator]):
             gen.tank_capacity = tank_capacity
             gen.consumption_rate = consumption_rate
         return gen
-
-    async def update_total_hours(self, name: str, hours: float) -> bool:
-        gen = await self.get_by_name(name)
-        if gen:
-            gen.total_hours_run = hours
-            return True
-        return False
 
     async def reset_antigel_counter(self, name: str) -> bool:
         gen = await self.get_by_name(name)

@@ -37,7 +37,8 @@ def test_control_kb_uses_generator_ids():
 
     data = _callbacks(kb)
     assert GenCb(action="start", id=7).pack() in data
-    assert GenCb(action="standby", id=9).pack() in data
+    assert GenCb(action="start", id=9).pack() in data
+    assert not any("standby" in d for d in data)  # standby mode was removed
     assert kb.inline_keyboard[0][0].text == "🟢 Старт WILSON"
 
 
@@ -85,7 +86,7 @@ def _service(repo) -> GeneratorService:
 async def test_disabling_running_generator_stops_it_and_accounts_fuel():
     gen = _gen(5, "WILSON", GenStatus.running, current_run_start=utcnow() - timedelta(hours=2))
     repo = MagicMock(get_by_id=AsyncMock(return_value=gen), add_fuel=AsyncMock(return_value=16.0),
-                     update_total_hours=AsyncMock(), set_status=AsyncMock())
+                     set_status=AsyncMock())
 
     result = await _service(repo).set_active(user_id=1, gen_id=5, active=False)
 
@@ -93,23 +94,12 @@ async def test_disabling_running_generator_stops_it_and_accounts_fuel():
     repo.set_status.assert_awaited_with("WILSON", GenStatus.stopped)
     consumed = repo.add_fuel.await_args.args[1]
     assert consumed == pytest.approx(-4.0, abs=0.05)  # 2 h * 2 L/h
-    assert repo.update_total_hours.await_args.args[1] == pytest.approx(2.0, abs=0.01)
-
-
-async def test_disabling_standby_generator_sets_stopped():
-    gen = _gen(5, "WILSON", GenStatus.standby)
-    repo = MagicMock(get_by_id=AsyncMock(return_value=gen), add_fuel=AsyncMock(), set_status=AsyncMock())
-
-    await _service(repo).set_active(user_id=1, gen_id=5, active=False)
-
-    repo.set_status.assert_awaited_once_with("WILSON", GenStatus.stopped)
-    repo.add_fuel.assert_not_awaited()
-    assert gen.is_active is False
+    assert gen.total_hours_run == pytest.approx(2.0, abs=0.01)
 
 
 def _stop_repo(*gens, fuel_left: float = 100.0):
     return MagicMock(get_all=AsyncMock(return_value=list(gens)), add_fuel=AsyncMock(return_value=fuel_left),
-                     update_total_hours=AsyncMock(), set_status=AsyncMock())
+                     set_status=AsyncMock())
 
 
 async def test_stop_reports_runtime_fuel_and_notifies_all_when_enabled():
@@ -125,20 +115,75 @@ async def test_stop_reports_runtime_fuel_and_notifies_all_when_enabled():
     service.notifier.notify_all.assert_awaited_once_with(text)
 
 
-async def test_standby_report_includes_runtime_and_respects_notify_toggle():
+async def test_stop_report_respects_notify_toggle():
     gen = _gen(5, "WILSON", GenStatus.running, current_run_start=utcnow() - timedelta(minutes=30))
     service = _service(_stop_repo(gen))
     service.redis = MagicMock(get=AsyncMock(return_value=b"0"))  # notifications switched off
     service.notifier = MagicMock(notify_all=AsyncMock())
 
-    text = await service.set_standby(user_id=1, name="WILSON")
-
-    assert "30 хв" in text and "ЧЕРГУВАННЯ" in text
+    assert "30 хв" in await service.stop_all(user_id=1)
     service.notifier.notify_all.assert_not_awaited()
 
 
+async def test_stop_report_shows_hours_since_maintenance_after_this_run():
+    gen = _gen(5, "WILSON", GenStatus.running, current_run_start=utcnow() - timedelta(hours=2),
+               last_maintenance=utcnow() - timedelta(days=30), maint_hours_at=100.0,
+               maint_interval_hours=200.0, maint_interval_months=12)
+    gen.total_hours_run = 221.4
+    service = _service(_stop_repo(gen))
+
+    text = await service._stop_and_calculate(gen, user_id=1)
+
+    assert gen.total_hours_run == pytest.approx(223.4, abs=0.01)
+    assert "🔧 Після ТО: 123.4 год (до ТО: 77 год)" in text
+
+
+async def test_stop_report_without_maintenance_shows_total_hours():
+    gen = _gen(5, "WILSON", GenStatus.running, current_run_start=utcnow() - timedelta(hours=1))
+    text = await _service(_stop_repo(gen))._stop_and_calculate(gen, user_id=1)
+    assert "🔧 Мотогодини всього: 1.0 год (ТО не задано)" in text
+
+
+async def test_start_of_running_generator_keeps_run_start():
+    started = utcnow() - timedelta(minutes=6)
+    gen = _gen(5, "WILSON", GenStatus.running, current_run_start=started)
+    service = _service(_stop_repo(gen))
+    service.notifier = MagicMock(notify_all=AsyncMock())
+
+    assert await service.start_generator(user_id=1, name="WILSON") is False
+
+    assert gen.current_run_start == started
+    service.repo.set_status.assert_not_awaited()
+    service.repo.add_fuel.assert_not_awaited()
+    service.logs.log_action.assert_not_awaited()
+    service.notifier.notify_all.assert_not_awaited()
+
+
+async def test_start_handler_tells_user_generator_already_running():
+    from bot.handlers.generators import start_generator_callback
+
+    callback = MagicMock(answer=AsyncMock())
+    callback.from_user.id = 1
+    callback.message.edit_text = AsyncMock()
+    svc = MagicMock(get_active=AsyncMock(return_value=_gen(5, "WILSON", GenStatus.running)),
+                    get_warming_recommendation=AsyncMock(return_value=None),
+                    start_generator=AsyncMock(return_value=False))
+
+    await start_generator_callback(callback, GenCb(action="start", id=5), svc)
+
+    callback.answer.assert_awaited_once_with("ℹ️ Генератор уже працює", show_alert=True)
+    callback.message.edit_text.assert_not_awaited()
+
+
+def test_estimated_fuel_level_subtracts_burnt_fuel_while_running():
+    gen = _gen(5, "WILSON", GenStatus.running, current_run_start=utcnow() - timedelta(hours=3))  # 20 L, 2 L/h
+    assert GeneratorService.estimated_fuel_level(gen, 1.0) == pytest.approx(14.0, abs=0.01)
+    assert GeneratorService.estimated_fuel_level(gen, 5.0) == 0.0  # never below empty
+    assert GeneratorService.estimated_fuel_level(_gen(6, "STOPPED"), 1.0) == 20.0
+
+
 async def test_stop_all_without_running_generator_reports_nothing():
-    service = _service(_stop_repo(_gen(5, "WILSON", GenStatus.standby)))
+    service = _service(_stop_repo(_gen(5, "WILSON", GenStatus.stopped)))
     service.redis = MagicMock(get=AsyncMock(return_value=None))
     service.notifier = MagicMock(notify_all=AsyncMock())
 
@@ -184,10 +229,30 @@ async def test_inventory_update_locks_row():
 
 
 async def test_generator_add_fuel_locks_row():
-    session = _session_returning(_gen(1, "WILSON"))
+    session = _session_returning(_gen(1, "WILSON", tank_capacity=40.0))
 
     assert await GeneratorRepository(session).add_fuel("WILSON", 5) == 25.0
     assert "FOR UPDATE" in _sql(session)
+
+
+async def test_generator_add_fuel_stays_between_empty_and_full_tank():
+    gen = _gen(1, "WILSON", tank_capacity=40.0)
+    gen.fuel_level = 15.0
+    repo = GeneratorRepository(_session_returning(gen))
+
+    assert await repo.add_fuel("WILSON", -19.8) == 0.0  # 3 h * 6.6 L/h from 15 L: empty, not -4.8
+    assert await repo.add_fuel("WILSON", 20) == 20.0  # next refuel counts in full
+    assert await repo.add_fuel("WILSON", 30) == 40.0  # capped by the tank
+
+
+async def test_refuel_untreated_fuel_never_exceeds_tank_content():
+    gen = _gen(1, "WILSON", tank_capacity=40.0)  # 20 L in tank
+    gen.fuel_since_antigel = 15.0  # +30 L would make 45 L untreated in a 40 L tank
+    repo = MagicMock(add_fuel=AsyncMock(return_value=40.0), get_by_name=AsyncMock(return_value=gen))
+
+    await _service(repo).log_refuel(user_id=1, gen_name="WILSON", liters=30)
+
+    assert gen.fuel_since_antigel == 40.0
 
 
 # --- refuel failure must roll back -------------------------------------------

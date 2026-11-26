@@ -48,9 +48,6 @@ async def _get_status_panel(generator_service: GeneratorService, with_keyboard: 
         if g.status == GenStatus.running:
             status_icon = "🟢"
             status_text = "ПРАЦЮЄ"
-        elif g.status == GenStatus.standby:
-            status_icon = "🟡"
-            status_text = "ЧЕРГУЄ (STANDBY)"
         else:
             status_icon = "🔴"
             status_text = "ЗУПИНЕНО"
@@ -61,10 +58,11 @@ async def _get_status_panel(generator_service: GeneratorService, with_keyboard: 
         if antigel.needed:
             text += f"   💉 <b>Потрібна присадка:</b> ≈{antigel.dose_ml} мл\n"
         
-        # Runtime prediction
-        hours_left = (g.fuel_level / adj_rate) if adj_rate > 0 else 0
-        
-        text += f"   ⛽ <b>Залишок:</b> {g.fuel_level:.1f} л (бак {capacity:.1f} л)\n"
+        # Runtime prediction: a running generator has burnt fuel since its start
+        fuel_now = generator_service.estimated_fuel_level(g, factor)
+        hours_left = (fuel_now / adj_rate) if adj_rate > 0 else 0
+
+        text += f"   ⛽ <b>Залишок:</b> {fuel_now:.1f} л (бак {capacity:.1f} л)\n"
         
         if factor > 1.0:
             temp_text = f"{temp:.0f}°C" if temp is not None else "н/д"
@@ -107,7 +105,7 @@ async def _get_status_panel(generator_service: GeneratorService, with_keyboard: 
         text += "\n"
     text += "➖➖➖➖➖➖➖➖➖➖"
 
-    kb = get_generator_control_kb(gens, exclude_correction=exclude_correction, exclude_stop_all=exclude_correction) if with_keyboard else None
+    kb = get_generator_control_kb(gens, exclude_correction=exclude_correction) if with_keyboard else None
 
     if kb:
         # Add Notification Toggle Button
@@ -168,6 +166,7 @@ _STALE_PREFIXES = (
 )
 
 @router.callback_query(F.data.startswith(_STALE_PREFIXES))
+@router.callback_query(GenCb.filter(F.action == "standby"))  # standby mode was removed
 async def stale_generator_button(callback: types.CallbackQuery):
     await callback.answer(STALE_MENU_TEXT, show_alert=True)
 
@@ -190,24 +189,13 @@ async def start_generator_callback(callback: types.CallbackQuery, callback_data:
     if warm_rec:
         warning_text = f"\n\n{warm_rec}"
         
-    await generator_service.start_generator(callback.from_user.id, gen_name)
-    
+    if not await generator_service.start_generator(callback.from_user.id, gen_name):
+        await callback.answer("ℹ️ Генератор уже працює", show_alert=True)
+        return
+
     text, kb = await _get_status_panel(generator_service, exclude_correction=True)
     await callback.message.edit_text(text + warning_text, reply_markup=kb, parse_mode="HTML")
     await callback.answer(f"✅ {gen_name} запущено!")
-
-@router.callback_query(GenCb.filter(F.action == "standby"))
-async def standby_generator_callback(callback: types.CallbackQuery, callback_data: GenCb, generator_service: GeneratorService):
-    gen = await _active_gen_or_alert(callback, generator_service, callback_data.id)
-    if not gen:
-        return
-    gen_name = gen.name
-
-    report = await generator_service.set_standby(callback.from_user.id, gen_name)
-
-    text, kb = await _get_status_panel(generator_service, exclude_correction=True)
-    await callback.message.edit_text(f"{report}\n\n{text}", reply_markup=kb, parse_mode="HTML")
-    await callback.answer(f"🟡 {gen_name} в режимі очікування!")
 
 @router.callback_query(F.data == "stop_all_gens")
 async def stop_all_callback(callback: types.CallbackQuery, generator_service: GeneratorService):

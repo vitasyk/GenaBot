@@ -8,9 +8,10 @@ from bot.database.models import Generator, GenStatus
 from bot.database.repositories.generator import GeneratorRepository
 from bot.database.repositories.logs import LogRepository
 from bot.services.antigel import AntigelService
+from bot.services.maintenance import maintenance_status
 from bot.services.notifier import NotifierService
 from bot.services.weather import WeatherService
-from bot.utils.clock import utcnow
+from bot.utils.clock import now_local, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -50,16 +51,13 @@ class GeneratorService:
         return gen
 
     async def set_active(self, user_id: int, gen_id: int, active: bool) -> Generator | None:
-        """Enable/disable a generator. A running or standby one is stopped first,
+        """Enable/disable a generator. A running one is stopped first,
         so its runtime and fuel are accounted."""
         gen = await self.repo.get_by_id(gen_id)
         if not gen:
             return None
-        if not active:
-            if gen.status == GenStatus.running:
-                await self._stop_and_calculate(gen, user_id)
-            elif gen.status == GenStatus.standby:
-                await self.repo.set_status(gen.name, GenStatus.stopped)
+        if not active and gen.status == GenStatus.running:
+            await self._stop_and_calculate(gen, user_id)
         gen.is_active = active
         await self.logs.log_action(user_id, "ENABLE_GEN" if active else "DISABLE_GEN", gen.name)
         return gen
@@ -131,12 +129,16 @@ class GeneratorService:
         await self.redis.set(self.NOTIFY_KEY, "1" if new_state else "0")
         return new_state
 
-    async def start_generator(self, user_id: int, name: str):
-        # Stop all others first (safety rule: only 1 running)
+    async def start_generator(self, user_id: int, name: str) -> bool:
+        """Start `name` (stopping any other running one). False if it is already running:
+        nothing changes, so its current_run_start is kept."""
         all_gens = await self.repo.get_all()
+        if any(g.name == name and g.status == GenStatus.running for g in all_gens):
+            return False
+        # Stop all others first (safety rule: only 1 running)
         reports = []
         for g in all_gens:
-            if g.status == GenStatus.running and g.name != name:
+            if g.status == GenStatus.running:
                 reports.append(await self._stop_and_calculate(g, user_id))
 
         # Start target
@@ -148,38 +150,7 @@ class GeneratorService:
             msg = f"🟢 <b>УВАГА! Запущено генератор {html.escape(name)}</b>\n" \
                   f"⚡ Живлення відновлено від генератора."
             await self.notifier.notify_all("\n\n".join([r for r in reports if r] + [msg]))
-
-    async def set_standby(self, user_id: int, name: str) -> str:
-        """Returns the message shown to the user: the run report (if it was running) + standby line."""
-        # Exclusive Standby: If we set X to Standby, Y must be Stopped (if it was standby)
-        all_gens = await self.repo.get_all()
-
-        target_gen = next((g for g in all_gens if g.name == name), None)
-        if not target_gen:
-            return ""
-
-        report = None
-        if target_gen.status == GenStatus.running:
-            report = await self._stop_and_calculate(target_gen, user_id)
-
-        # Set target to standby
-        await self.repo.set_status(name, GenStatus.standby)
-        
-        # Disarm others
-        for g in all_gens:
-            if g.name != name and g.status == GenStatus.standby:
-                await self.repo.set_status(g.name, GenStatus.stopped)
-                
-        await self.logs.log_action(user_id, "SET_STANDBY", f"Set {name} to Standby")
-
-        msg = f"🟡 <b>Генератор {html.escape(name)} переведено в ЧЕРГУВАННЯ</b>\n" \
-              f"🏁 Роботу завершено, очікуємо наступного запуску."
-        if report:
-            msg = f"{report}\n\n{msg}"
-        # Global Notification for Standby
-        if await self.get_notify_start_status():
-            await self.notifier.notify_all(msg)
-        return msg
+        return True
 
     async def stop_all(self, user_id: int) -> str:
         """Returns the run reports of the generators that were running ("" if none was)."""
@@ -188,14 +159,21 @@ class GeneratorService:
         for g in all_gens:
             if g.status == GenStatus.running:
                 reports.append(await self._stop_and_calculate(g, user_id))
-            elif g.status == GenStatus.standby:
-                await self.repo.set_status(g.name, GenStatus.stopped)
         await self.logs.log_action(user_id, "STOP_ALL", "Stopped all generators")
 
         text = "\n\n".join(r for r in reports if r)
         if text and await self.get_notify_start_status():
             await self.notifier.notify_all(text)
         return text
+
+    @staticmethod
+    def estimated_fuel_level(gen: Generator, factor: float) -> float:
+        """Fuel now: for a running generator, the level at start minus what it has burnt since."""
+        level = gen.fuel_level or 0.0
+        if gen.status != GenStatus.running or not gen.current_run_start:
+            return level
+        hours = max((utcnow() - gen.current_run_start).total_seconds() / 3600.0, 0.0)
+        return max(level - hours * gen.consumption_rate * factor, 0.0)
 
     async def _stop_and_calculate(self, gen: Generator, user_id: int) -> str | None:
         """Stops a running generator, accounts runtime and fuel. Returns the run report (HTML)."""
@@ -218,14 +196,12 @@ class GeneratorService:
         consumed = runtime_hours * actual_rate
         
         level_before = gen.fuel_level or 0.0
-        fuel_left = await self.repo.add_fuel(gen.name, -consumed)
+        fuel_left = await self.repo.add_fuel(gen.name, -consumed)  # never below 0
         # The mix burns evenly: untreated litres shrink in proportion, the additive share stays
         if level_before > 0 and gen.fuel_since_antigel:
-            gen.fuel_since_antigel *= max(fuel_left, 0.0) / level_before
+            gen.fuel_since_antigel *= fuel_left / level_before
 
-        # Track total hours
-        new_total = (gen.total_hours_run or 0.0) + runtime_hours
-        await self.repo.update_total_hours(gen.name, new_total)
+        gen.total_hours_run = (gen.total_hours_run or 0.0) + runtime_hours
         
         await self.repo.set_status(gen.name, GenStatus.stopped)
         
@@ -241,20 +217,27 @@ class GeneratorService:
         duration = f"{hours} год {minutes} хв" if hours else f"{minutes} хв"
         temp_text = f"мороз {temp:.0f}°C" if temp is not None else "температура н/д"
         frost = f" ({temp_text}: +{(factor - 1) * 100:.0f}%)" if factor > 1.0 else ""
+        maint = maintenance_status(gen, now_local().date())
+        if maint:
+            since = max(gen.total_hours_run - (gen.maint_hours_at or 0.0), 0.0)
+            hours_line = f"🔧 Після ТО: {since:.1f} год (до ТО: {max(maint.hours_left, 0.0):.0f} год)"
+        else:
+            hours_line = f"🔧 Мотогодини всього: {gen.total_hours_run:.1f} год (ТО не задано)"
         return (f"🛑 <b>{html.escape(gen.name)} зупинено</b>\n"
                 f"⏱ Працював: {duration}\n"
                 f"⛽ Витрачено: ≈{consumed:.1f} л{frost}\n"
-                f"🛢 У баку: ≈{max(fuel_left, 0.0):.1f} л")
+                f"🛢 У баку: ≈{fuel_left:.1f} л\n"
+                f"{hours_line}")
 
     async def log_refuel(self, user_id: int, gen_name: str, liters: float):
         # 1. Update fuel level (row is locked inside add_fuel)
         new_level = await self.repo.add_fuel(gen_name, liters)
         
-        # 2. Update Anti-Gel counter
+        # 2. Update Anti-Gel counter (untreated fuel can't exceed what is in the capped tank)
         gen = await self.repo.get_by_name(gen_name)
         if not gen:
             raise ValueError(f"Generator {gen_name!r} not found")
-        gen.fuel_since_antigel += liters
+        gen.fuel_since_antigel = min(gen.fuel_since_antigel + liters, new_level)
             
         await self.logs.log_action(user_id, "REFUEL_GEN", f"Added {liters}L to {gen_name}. New Level: {new_level:.1f}L (Accumulated since Anti-Gel: {gen.fuel_since_antigel:.1f}L)")
 
