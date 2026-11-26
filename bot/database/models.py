@@ -35,7 +35,7 @@ class UserRole(str, Enum):
 class GenStatus(str, Enum):
     stopped = "stopped"
     running = "running"
-    standby = "standby"
+    standby = "standby"  # legacy, unused: dropping a Postgres enum value needs a type rebuild
 
 class SessionStatus(StrEnum):  # StrEnum: f"{status}" gives the value, not "SessionStatus.x"
     pending = "pending"

@@ -51,7 +51,7 @@ async def test_running_burns_untreated_fuel_in_proportion():
     gen = Generator(id=1, name="WILSON", status=GenStatus.running, fuel_level=100.0, consumption_rate=10.0,
                     total_hours_run=0.0, fuel_since_antigel=40.0,
                     current_run_start=utcnow() - timedelta(hours=5))
-    repo = MagicMock(add_fuel=AsyncMock(return_value=50.0), update_total_hours=AsyncMock(), set_status=AsyncMock())
+    repo = MagicMock(add_fuel=AsyncMock(return_value=50.0), set_status=AsyncMock())
     service = GeneratorService(repo, MagicMock(log_action=AsyncMock()), MagicMock(), MagicMock())
     service.weather = MagicMock(get_current_temperature=AsyncMock(return_value=5.0),
                                 get_consumption_factor=MagicMock(return_value=1.0))

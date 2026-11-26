@@ -10,7 +10,7 @@ STALE_MENU_TEXT = "Меню застаріло, відкрийте його зн
 
 
 class GenCb(CallbackData, prefix="gen"):
-    """Generator button: action (start, standby, refuel, correct, sos, toggle, antigel) + generator id."""
+    """Generator button: action (start, refuel, correct, sos, toggle, antigel) + generator id."""
     action: str
     id: int
 
@@ -18,30 +18,21 @@ class GenCb(CallbackData, prefix="gen"):
 def status_icon(status: GenStatus) -> str:
     if status == GenStatus.running:
         return "🟢"
-    if status == GenStatus.standby:
-        return "🟡"
     return "🔴"
 
 
-def get_generator_control_kb(gens: Sequence[Generator], exclude_correction: bool = False, exclude_stop_all: bool = False) -> InlineKeyboardMarkup:
+def get_generator_control_kb(gens: Sequence[Generator], exclude_correction: bool = False) -> InlineKeyboardMarkup:
     buttons = [
-        [
-            InlineKeyboardButton(text=f"🟢 Старт {g.name}", callback_data=GenCb(action="start", id=g.id).pack()),
-            InlineKeyboardButton(text=f"🟡 Чергування {g.name}", callback_data=GenCb(action="standby", id=g.id).pack()),
-        ]
+        [InlineKeyboardButton(text=f"🟢 Старт {g.name}", callback_data=GenCb(action="start", id=g.id).pack())]
         for g in gens
     ]
 
-    bottom_row = []
-
-    if not exclude_stop_all:
-        bottom_row.append(InlineKeyboardButton(text="🛑 Зупинити всі", callback_data="stop_all_gens"))
+    bottom_row = [InlineKeyboardButton(text="🛑 Зупинити всі", callback_data="stop_all_gens")]
 
     if not exclude_correction:
         bottom_row.append(InlineKeyboardButton(text="🔧 Корегування", callback_data="correct_fuel_menu"))
 
-    if bottom_row:
-        buttons.append(bottom_row)
+    buttons.append(bottom_row)
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
