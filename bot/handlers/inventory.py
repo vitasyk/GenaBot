@@ -272,6 +272,8 @@ async def refuel_accumulator_done(callback: types.CallbackQuery, state: FSMConte
         await callback.message.answer("❌ Не вдалося записати заправку, зміни скасовано. Спробуйте ще раз.")
         await callback.answer()
         raise
+    # Commit before editing the message: a failed edit must not roll the refuel back
+    await inventory_service.repo.session.commit()
 
     new_amount_cans = new_amount_liters / LITERS_PER_CAN
 

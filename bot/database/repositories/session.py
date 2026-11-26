@@ -73,7 +73,8 @@ class SessionRepository:
                                cans: float,
                                notes: str | None = None) -> RefuelSession | None:
         """Completes an open session. Returns None if it was already completed or cancelled,
-        so a second worker can't record (and deduct) the same refuel twice."""
+        so a second worker can't record (and deduct) the same refuel twice.
+        Does not commit: the caller commits it together with the fuel writes."""
         stmt = update(RefuelSession).where(
             RefuelSession.id == session_id,
             RefuelSession.status.in_(OPEN_STATUSES),
@@ -87,7 +88,6 @@ class SessionRepository:
             notes=notes
         )
         result = await self.session.execute(stmt)
-        await self.session.commit()
         if result.rowcount == 0:
             return None
         return await self.get_session_by_id(session_id)

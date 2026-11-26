@@ -1,4 +1,3 @@
-from contextlib import asynccontextmanager
 from datetime import date, datetime, time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -20,11 +19,6 @@ def at(hour: int, minute: int = 0, day: date = TODAY):
     return patch("bot.services.session_service.now_local", return_value=datetime.combine(day, time(hour, minute)))
 
 
-@asynccontextmanager
-async def fake_session_maker():
-    yield MagicMock()
-
-
 def fsm() -> FSMContext:
     return FSMContext(storage=MemoryStorage(), key=StorageKey(bot_id=1, chat_id=7, user_id=7))
 
@@ -38,30 +32,38 @@ def message(text: str) -> MagicMock:
     return msg
 
 
-async def finish(repo_result, notes="тиск < 2"):
-    """Runs finish_session with the given complete_session() result; returns (msg, services, state)."""
+async def finish(repo_result, notes="тиск < 2", take_fuel_error=None, reply_error=None):
+    """Runs finish_session with the given complete_session() result; returns (msg, services, state, repo)."""
     state = fsm()
     await state.update_data(session_id=5, gen_fuel_data={"GEN-2 (003) WILSON": 20.0}, antigel_added=False)
     await state.set_state(sessions.SessionStates.waiting_for_notes)
     inventory = AsyncMock()
     inventory.take_fuel.return_value = 100
+    inventory.take_fuel.side_effect = take_fuel_error
     generator = AsyncMock()
     generator.get_status.return_value = []
     repo = MagicMock()
     repo.complete_session = AsyncMock(return_value=repo_result)
+    repo.session.commit = AsyncMock()
+    repo.session.rollback = AsyncMock()
     msg = message(notes)
-    with patch.object(sessions, "session_maker", fake_session_maker), \
-         patch.object(sessions, "SessionRepository", return_value=repo), \
-         patch.object(sessions, "NotifierService") as notifier:
+    if reply_error:
+        async def reply_fails(*args, **kwargs):  # records whether the refuel was committed before the reply
+            raise reply_error(repo.session.commit.await_count)
+        msg.answer.side_effect = reply_fails
+    with patch.object(sessions, "NotifierService") as notifier:
         notifier.return_value.notify_admins = AsyncMock()
-        await sessions.finish_session(msg, state, MagicMock(), notes=notes,
+        await sessions.finish_session(msg, state, MagicMock(), notes=notes, session_repo=repo,
                                       generator_service=generator, inventory_service=inventory)
-    return msg, inventory, generator, state
+    return msg, inventory, generator, state, repo
+
+
+COMPLETED = SimpleNamespace(end_time=datetime(2026, 10, 18, 12, 30))
 
 
 async def test_second_completion_does_not_deduct_fuel_again():
     # Regression: two workers completing the same session deducted fuel twice
-    msg, inventory, generator, state = await finish(repo_result=None)
+    msg, inventory, generator, state, _ = await finish(repo_result=None)
 
     inventory.take_fuel.assert_not_called()
     generator.log_refuel.assert_not_called()
@@ -69,16 +71,37 @@ async def test_second_completion_does_not_deduct_fuel_again():
     assert await state.get_state() is None
 
 
-async def test_note_with_html_is_escaped_and_state_cleared_first():
+async def test_note_with_html_is_escaped_and_state_cleared():
     # Regression: "<" in a note broke the reply, the state stayed, the next text completed again
-    completed = SimpleNamespace(end_time=datetime(2026, 10, 18, 12, 30))
-    msg, inventory, generator, state = await finish(repo_result=completed)
+    msg, inventory, generator, state, _ = await finish(repo_result=COMPLETED)
 
     inventory.take_fuel.assert_awaited_once_with(7, 20.0)
     generator.log_refuel.assert_awaited_once_with(7, "GEN-2 (003) WILSON", 20.0)
     text = msg.answer.call_args.args[0]
     assert "тиск &lt; 2" in text and "Петро &lt;О.&gt;" in text
     assert await state.get_state() is None
+
+
+async def test_failed_reply_does_not_lose_the_refuel():
+    # Regression: the reply failed after the fuel writes, the middleware rolled them back,
+    # the session (committed separately) stayed completed with no fuel deducted
+    class TelegramDown(Exception):
+        def __init__(self, commits_before_reply: int):
+            self.commits_before_reply = commits_before_reply
+
+    with pytest.raises(TelegramDown) as err:
+        await finish(repo_result=COMPLETED, reply_error=TelegramDown)
+    assert err.value.commits_before_reply == 1
+
+
+async def test_fuel_write_failure_rolls_back_and_lets_the_worker_retry():
+    # Regression: a failed take_fuel was only logged, the user saw success and the session stayed completed
+    msg, _, _, state, repo = await finish(repo_result=COMPLETED, take_fuel_error=RuntimeError("db"))
+
+    repo.session.rollback.assert_awaited_once()
+    repo.session.commit.assert_not_called()
+    assert "зміни скасовано" in msg.answer.call_args.args[0]
+    assert await state.get_state() == sessions.SessionStates.waiting_for_notes.state
 
 
 async def enter_liters(needed: bool):
