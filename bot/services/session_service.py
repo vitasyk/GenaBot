@@ -17,8 +17,7 @@ from bot.database.repositories.session_helpers import (
     split_workers,
 )
 from bot.database.repositories.user import UserRepository
-from bot.keyboards.inline_kb import get_start_generator_kb
-from bot.keyboards.session_kb import get_start_session_kb
+from bot.keyboards.session_kb import get_outage_warning_kb, get_start_session_kb
 from bot.services.antigel import AntigelService, format_advice
 from bot.services.google_sheets import GoogleSheetsService
 from bot.services.notifier import NotifierService
@@ -32,6 +31,24 @@ OUTAGE_WARNING_DELAY = timedelta(minutes=5)
 # A bot restart later than this into the outage doesn't send a stale warning
 OUTAGE_WARNING_WINDOW = timedelta(hours=1)
 OUTAGE_WARNED_KEY = "outage:warned:{start}"
+# Set when a worker answered "power is on" to the warning: no refuel session for that block
+OUTAGE_POWER_ON_KEY = "outage:power_on:{block}"
+OUTAGE_KEY_TTL = int(timedelta(days=2).total_seconds())
+
+
+def outage_block_id(block_start: datetime) -> int:
+    """Compact block id for callback data and Redis keys: YYYYMMDDHH of the naive Kyiv start."""
+    return int(block_start.strftime("%Y%m%d%H"))
+
+
+async def record_outage_answer(redis: Redis, block: int, power_on: bool) -> None:
+    """Remember the answer to the outage warning; the last answer wins."""
+    key = OUTAGE_POWER_ON_KEY.format(block=block)
+    if power_on:
+        await redis.set(key, 1, ex=OUTAGE_KEY_TTL)
+    else:
+        await redis.delete(key)
+
 
 class SessionService:
     def __init__(self, session: AsyncSession, bot=None, redis: Redis | None = None):
@@ -117,6 +134,8 @@ class SessionService:
                 # We use deadline (power return time) as the storage key for start_time
                 if await self.repo.exists_by_start_time(deadline):
                     continue
+                if self.redis and await self.redis.get(OUTAGE_POWER_ON_KEY.format(block=outage_block_id(block[0]))):
+                    continue
                 
                 # Create session for this finished block
                 # deadline is the time power returned
@@ -133,15 +152,15 @@ class SessionService:
         if not gens or any(g.status == GenStatus.running for g in gens):
             return
         key = OUTAGE_WARNED_KEY.format(start=block_start.isoformat())
-        if not await self.redis.set(key, 1, ex=int(timedelta(days=2).total_seconds()), nx=True):
+        if not await self.redis.set(key, 1, ex=OUTAGE_KEY_TTL, nx=True):
             return
 
         worker_ids, worker_tags = await self._resolve_workers(block_start + OUTAGE_WARNING_DELAY)
         msg = (f"⚠️ <b>Можливе відключення електрики</b>\n\n"
                f"За графіком (черга {html.escape(config.QUEUE_NUMBER)}) світло мало зникнути о "
                f"{block_start.strftime('%H:%M')} (до {power_back.strftime('%H:%M')}).\n"
-               f"Якщо генератор увімкнувся, позначте це кнопкою нижче.")
-        kb = get_start_generator_kb(gens)
+               f"Світла немає? Якщо генератор увімкнувся, позначте це кнопкою нижче.")
+        kb = get_outage_warning_kb(gens, outage_block_id(block_start))
         for worker_id in worker_ids:
             await self.notifier.notify_user(worker_id, msg, reply_markup=kb)
         await self.notifier.notify_admins(

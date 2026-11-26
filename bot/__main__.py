@@ -55,6 +55,7 @@ async def main():
         errors,
         generators,
         inventory,
+        outage,
         schedule,
         sessions,
         weather,
@@ -65,6 +66,7 @@ async def main():
     dp.include_router(common.router)
     dp.include_router(inventory.router)
     dp.include_router(sessions.router)
+    dp.include_router(outage.router)
     dp.include_router(generators.router)
     dp.include_router(weather.router)
     dp.include_router(errors.router)  # global error handler: catches exceptions from every router

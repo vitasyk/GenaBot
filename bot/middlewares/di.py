@@ -49,6 +49,7 @@ class DbSessionMiddleware(BaseMiddleware):
             data["log_repo"] = log_repo
             data["schedule_repo"] = schedule_repo
             data["session_repo"] = SessionRepository(session)
+            data["redis"] = self.redis
             
             # Slack Service
             slack_service = SlackService(config.SLACK_WEBHOOK_URL)
