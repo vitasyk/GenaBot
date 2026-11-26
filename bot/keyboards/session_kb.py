@@ -1,9 +1,10 @@
 from collections.abc import Sequence
 
+from aiogram.filters.callback_data import CallbackData
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.database.models import Generator
-from bot.keyboards.inline_kb import GenCb, status_icon
+from bot.keyboards.inline_kb import GenCb, get_start_generator_kb, status_icon
 
 
 def get_start_session_kb(session_id: int) -> InlineKeyboardMarkup:
@@ -58,3 +59,19 @@ def get_antigel_kb() -> InlineKeyboardMarkup:
         ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+class OutageAnswerCb(CallbackData, prefix="outage"):
+    """Answer to the outage warning. block: block start as YYYYMMDDHH (naive Kyiv time)."""
+    power: bool  # True = power is on, the outage did not happen
+    block: int
+
+
+def get_outage_warning_kb(gens: Sequence[Generator], block: int) -> InlineKeyboardMarkup:
+    """Outage warning: 'generator started' buttons plus 'is the power off?' yes/no row (kept last)."""
+    rows = get_start_generator_kb(gens).inline_keyboard
+    rows.append([
+        InlineKeyboardButton(text="✅ Так, світла немає", callback_data=OutageAnswerCb(power=False, block=block).pack()),
+        InlineKeyboardButton(text="❌ Ні, світло є", callback_data=OutageAnswerCb(power=True, block=block).pack()),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)

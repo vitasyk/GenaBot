@@ -13,17 +13,15 @@ from redis.asyncio import Redis
 
 from bot.config import config
 from bot.database.main import session_maker
-from bot.database.models import Generator, GenStatus
+from bot.database.models import Generator
 from bot.database.repositories.generator import GeneratorRepository
-from bot.database.repositories.inventory import InventoryRepository
 from bot.database.repositories.schedule import ScheduleRepository
 from bot.services.hoe_schedule import parse_hoe_page, sync_queue_schedule
-from bot.services.inventory import LITERS_PER_CAN
 from bot.services.maintenance import format_status, maintenance_status
 from bot.services.notifier import NotifierService
 from bot.services.schedule_parser import ScheduleParser
 from bot.services.weather import WeatherService
-from bot.utils.clock import now_local, utcnow
+from bot.utils.clock import now_local
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +32,6 @@ scheduler = AsyncIOScheduler(timezone=TZ)
 DEFAULT_OUTAGE_CHECK_MINUTES = 1
 HOE_MONITOR_MINUTES = 5
 MAINTENANCE_NOTIFIED_KEY = "maintenance:notified:{gen_id}"
-# Continuous run hours: recommend switching / demand switching to another generator
-ROTATION_WARN_HOURS = 4
-ROTATION_CRITICAL_HOURS = 6
 # config attribute -> Redis key for values admins change at runtime
 RUNTIME_SETTING_KEYS = {
     "RESTRICT_ACCESS": "config:restrict_access",
@@ -44,66 +39,6 @@ RUNTIME_SETTING_KEYS = {
     "FUEL_THRESHOLD_CANS": "config:fuel_threshold_cans",
     "QUEUE_NUMBER": "config:queue_number",
 }
-
-async def check_rotation_needed(bot: Bot):
-    async with session_maker() as session:
-        gen_repo = GeneratorRepository(session)
-        inv_repo = InventoryRepository(session)
-        
-        gens = await gen_repo.get_all()
-        running_gen = next((g for g in gens if g.status == GenStatus.running), None)
-        
-        if not running_gen or not running_gen.current_run_start:
-            return
-
-        # Calculate duration
-        now = utcnow()
-        duration = now - running_gen.current_run_start
-        hours_run = duration.total_seconds() / 3600
-
-        msg = ""
-        if hours_run >= ROTATION_CRITICAL_HOURS:
-            msg = f"⚠️ <b>УВАГА: ПОТРІБНА РОТАЦІЯ!</b>\nГенератор {running_gen.name} працює вже {hours_run:.1f} год.\nТерміново перемкніть на інший!"
-        elif hours_run >= ROTATION_WARN_HOURS and hours_run < ROTATION_WARN_HOURS + 0.6:
-            # Check inventory for next gen
-            stock_liters = await inv_repo.get_stock()
-            stock_cans = stock_liters / LITERS_PER_CAN
-            fuel_status = f"Запас на складі: {stock_cans:.1f} каністр ({stock_liters}л)."
-            if stock_cans < 1:
-                fuel_status += " ⚠️ МАЛО ПАЛИВА! Немає чим заправити наступний."
-            
-            # Predict remaining fuel in current gen
-            # 1. Get weather factor
-            weather = WeatherService()
-            temp = await weather.get_current_temperature()
-            factor = weather.get_consumption_factor(temp)
-            
-            # 2. Calculate consumed fuel during this run
-            # running_gen.consumption_rate is L/h
-            base_rate = running_gen.consumption_rate
-            actual_rate = base_rate * factor
-            consumed = hours_run * actual_rate
-            
-            # 3. Calculate current level
-            # fuel_level is the level at start or last refuel/correction?
-            # Usually fuel_level is updated ONLY when stopped or refueled. 
-            # So start_level = running_gen.fuel_level
-            start_level = running_gen.fuel_level
-            current_level = start_level - consumed
-            if current_level < 0: current_level = 0.0
-            
-            time_left = current_level / actual_rate if actual_rate > 0 else 0
-            
-            msg = (f"⚠️ <b>Рекомендовано ротацію</b>\n"
-                   f"{running_gen.name} працює: {hours_run:.1f} год.\n"
-                   f"У баку: {current_level:.1f}л (~{time_left:.1f} год).\n"
-                   f"{fuel_status}\n"
-                   f"Плануйте перемикання у найближчі 2 години.")
-
-        if msg:
-            from bot.services.notifier import NotifierService
-            notifier = NotifierService(bot)
-            await notifier.notify_all(msg)
 
 async def notify_maintenance_due(gens: Sequence[Generator], redis: Redis, notifier: NotifierService) -> None:
     """Alert once when maintenance gets close ("soon") and once when it is due.
@@ -191,9 +126,6 @@ async def warming_check_job(bot: Bot, redis: Redis):
 
 def start_scheduler(bot: Bot, redis: Redis):
     """Jobs share the bot's Redis client instead of opening a connection per run."""
-    # Check rotation every 30 mins
-    scheduler.add_job(check_rotation_needed, IntervalTrigger(minutes=30), args=[bot])
-
     # Check maintenance every 12 hours
     scheduler.add_job(check_maintenance_needed, IntervalTrigger(hours=12), args=[bot, redis])
 

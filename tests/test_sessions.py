@@ -9,9 +9,10 @@ from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.database.models import GenStatus, SessionStatus
-from bot.handlers import sessions
+from bot.handlers import outage, sessions
 from bot.keyboards.inline_kb import GenCb
-from bot.services.session_service import SessionService
+from bot.keyboards.session_kb import OutageAnswerCb, get_outage_warning_kb
+from bot.services.session_service import SessionService, record_outage_answer
 
 TODAY = date(2026, 10, 18)
 
@@ -168,8 +169,46 @@ async def test_outage_start_warning_after_grace_with_start_button(service, fake_
     kb = service.notifier.notify_user.call_args.kwargs["reply_markup"]
     assert user_id == 555 and "16:00" in text
     assert kb.inline_keyboard[0][0].callback_data == GenCb(action="start", id=2).pack()
+    yes, no = kb.inline_keyboard[-1]
+    assert yes.text == "✅ Так, світла немає" and no.text == "❌ Ні, світло є"
+    assert no.callback_data == OutageAnswerCb(power=True, block=2026101816).pack()
+    assert len(no.callback_data.encode()) <= 64
     service.notifier.notify_admins.assert_awaited_once()
     service.repo.create_session.assert_not_called()
+
+
+@pytest.mark.parametrize("answers, created", [
+    ([], True),                       # no answer: session as before
+    ([True], False),                  # "Ні, світло є"
+    ([False], True),                  # "Так, світла немає"
+    ([True, False], True),            # last answer wins
+])
+async def test_outage_answer_decides_refuel_session(service, fake_redis, answers, created):
+    outage_from_16_to_19(service, redis=fake_redis)
+    for power_on in answers:
+        await record_outage_answer(fake_redis, 2026101816, power_on)
+    with at(19, 0):
+        await service.check_power_outage()
+    assert service.repo.create_session.called is created
+
+
+async def test_outage_answer_handler_edits_message(fake_redis):
+    gens = [SimpleNamespace(id=2, name="WILSON")]
+    for power_on in (True, False):
+        cb = MagicMock(from_user=SimpleNamespace(full_name="Петро <x>"), answer=AsyncMock())
+        cb.message = MagicMock(html_text="⚠️ warn", edit_text=AsyncMock(),
+                               reply_markup=get_outage_warning_kb(gens, 2026101816))
+        await outage.outage_answer(cb, OutageAnswerCb(power=power_on, block=2026101816), fake_redis)
+
+        text, kb = cb.message.edit_text.call_args.args[0], cb.message.edit_text.call_args.kwargs["reply_markup"]
+        assert "Петро &lt;x&gt;" in text
+        if power_on:
+            assert "світло є" in text and kb is None
+            assert await fake_redis.get("outage:power_on:2026101816")
+        else:
+            assert "Світла немає" in text
+            assert [r[0].callback_data for r in kb.inline_keyboard] == [GenCb(action="start", id=2).pack()]
+            assert await fake_redis.get("outage:power_on:2026101816") is None
 
 
 async def test_no_outage_warning_when_generator_already_running(service, fake_redis):
