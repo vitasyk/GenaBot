@@ -130,9 +130,8 @@ class SessionService:
             # Trigger if we are at or past the deadline, but within a 'catch-up' window (e.g. 60 mins)
             # This is the PRIMARY trigger for refueling sessions.
             if now >= deadline and now < deadline + timedelta(hours=1):
-                # Check if session already exists for this block
-                # We use deadline (power return time) as the storage key for start_time
-                if await self.repo.exists_by_start_time(deadline):
+                # One session per outage: also skipped when a generator stop already created one
+                if await self.repo.exists_since(block[0]):
                     continue
                 if self.redis and await self.redis.get(OUTAGE_POWER_ON_KEY.format(block=outage_block_id(block[0]))):
                     continue
@@ -183,8 +182,16 @@ class SessionService:
                 f"📢 <b>Дедлайн сесії!</b> Сесія {overdue.id} не завершена до {deadline_str}."
             )
 
-    async def _create_outage_session(self, block_start: datetime, deadline: datetime) -> RefuelSession:
-        """Internal helper to create session and notify workers/admins"""
+    async def create_run_session(self, run_start: datetime, run_end: datetime) -> RefuelSession | None:
+        """After a generator stop (naive Kyiv times): a session to check whether it needs refuelling.
+        Skipped when a session (e.g. the scheduled outage one) already covers this run."""
+        if await self.repo.exists_since(run_start):
+            return None
+        return await self._create_outage_session(run_start, run_end, after_run=True)
+
+    async def _create_outage_session(self, block_start: datetime, deadline: datetime,
+                                     after_run: bool = False) -> RefuelSession:
+        """Create a session and notify workers/admins. after_run: made by a generator stop, not the schedule."""
         now = now_local()
 
         # Workers on shift JUST BEFORE restoration
@@ -206,14 +213,21 @@ class SessionService:
                 return dt.strftime('%H:%M') if dt.date() == now.date() else dt.strftime('%d.%m %H:%M')
 
             tags_str = ", ".join(worker_tags) or "невідомо"
-            msg = f"⚡ <b>Світло з'явилося!</b>\n\n" \
-                  f"⏰ Період відключення: {fmt_dt(block_start)} - {fmt_dt(deadline)}\n" \
-                  f"👷 На зміні були: {tags_str}\n\n" \
-                  f"Будь ласка, заправте генератор(и) та завершіть сесію."
+            if after_run:
+                msg = f"🛑 <b>Генератор зупинено</b>\n\n" \
+                      f"⏰ Працював: {fmt_dt(block_start)} - {fmt_dt(deadline)}\n" \
+                      f"👷 На зміні: {tags_str}\n\n" \
+                      f"Перевірте рівень палива, за потреби дозаправте та завершіть сесію."
+            else:
+                msg = f"⚡ <b>Світло з'явилося!</b>\n\n" \
+                      f"⏰ Період відключення: {fmt_dt(block_start)} - {fmt_dt(deadline)}\n" \
+                      f"👷 На зміні були: {tags_str}\n\n" \
+                      f"Будь ласка, заправте генератор(и) та завершіть сесію."
             msg += await self._antigel_hints()
             await self._notify_workers(session, msg)
 
-            admin_msg = f"🚀 <b>Створено сесію заправки</b> (ID: {session.id})\n" \
+            kind = "поза графіком (після зупинки генератора)" if after_run else "заправки"
+            admin_msg = f"🚀 <b>Створено сесію {kind}</b> (ID: {session.id})\n" \
                         f"⏰ Період: {fmt_dt(block_start)} - {fmt_dt(deadline)}\n" \
                         f"👷 Воркери ({len(worker_ids)}): {tags_str}\n"
             if not worker_ids:

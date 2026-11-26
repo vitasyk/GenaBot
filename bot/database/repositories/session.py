@@ -46,9 +46,9 @@ class SessionRepository:
     async def get_session_by_id(self, session_id: int) -> RefuelSession | None:
         return await self.session.get(RefuelSession, session_id)
         
-    async def exists_by_start_time(self, start_time: datetime) -> bool:
-        """Check if a session with this exact start_time already exists"""
-        stmt = select(RefuelSession).where(RefuelSession.start_time == start_time)
+    async def exists_since(self, start_time: datetime) -> bool:
+        """Whether a session starting at or after start_time exists (one session per outage or run)."""
+        stmt = select(RefuelSession).where(RefuelSession.start_time >= start_time).limit(1)
         result = await self.session.execute(stmt)
         return result.scalars().first() is not None
         

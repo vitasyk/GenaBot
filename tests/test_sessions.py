@@ -133,7 +133,7 @@ def service() -> SessionService:
     service = SessionService(AsyncMock(), bot=AsyncMock())
     service.repo = MagicMock()
     service.repo.get_overdue_sessions = AsyncMock(return_value=[])
-    service.repo.exists_by_start_time = AsyncMock(return_value=False)
+    service.repo.exists_since = AsyncMock(return_value=False)
     service.repo.update_status = AsyncMock()
     service.repo.create_session = AsyncMock(side_effect=lambda **kw: SimpleNamespace(
         id=9, worker1_id=kw["worker1_id"], worker2_id=kw["worker2_id"], worker3_id=kw["worker3_id"],
@@ -276,3 +276,56 @@ async def test_overdue_session_reminds_once_and_expires(service):
 
     service.repo.update_status.assert_awaited_once_with(3, SessionStatus.expired)
     service.notifier.notify_user.assert_awaited_once()
+
+
+# --- off-schedule session after a manual generator run ---------------------
+
+async def test_stop_creates_session_to_check_the_tank(service):
+    start, end = datetime.combine(TODAY, time(10, 15)), datetime.combine(TODAY, time(12, 40))
+    with at(12, 40):
+        created = await service.create_run_session(start, end)
+
+    assert created is not None
+    service.repo.exists_since.assert_awaited_once_with(start)
+    assert service.repo.create_session.call_args.kwargs["start_time"] == end
+    _, text = service.notifier.notify_user.call_args.args[:2]
+    assert "Генератор зупинено" in text and "10:15 - 12:40" in text
+    assert "поза графіком" in service.notifier.notify_admins.call_args.args[0]
+
+
+async def test_stop_skips_session_when_outage_already_has_one(service):
+    service.repo.exists_since = AsyncMock(return_value=True)  # scheduled session already created
+    with at(19, 30):
+        assert await service.create_run_session(datetime.combine(TODAY, time(16)), datetime.combine(TODAY, time(19, 30))) is None
+    service.repo.create_session.assert_not_called()
+
+
+async def test_scheduled_session_skipped_after_stop_already_made_one(service):
+    outage_from_16_to_19(service)
+    service.repo.exists_since = AsyncMock(return_value=True)  # the stop at 18:50 created a session
+    with at(19, 5):
+        await service.check_power_outage()
+
+    service.repo.exists_since.assert_awaited_with(datetime.combine(TODAY, time(16)))
+    service.repo.create_session.assert_not_called()
+
+
+async def test_stop_button_creates_run_session_only_after_a_run(monkeypatch):
+    from bot.handlers import generators
+
+    run_start = datetime(2026, 10, 18, 8, 0)  # naive UTC = 11:00 Kyiv
+    gen_service = MagicMock(stop_all=AsyncMock(return_value="report"))
+    gen_service.get_all = AsyncMock(return_value=[SimpleNamespace(status=GenStatus.running, current_run_start=run_start)])
+    created = AsyncMock()
+    monkeypatch.setattr(generators, "SessionService", MagicMock(return_value=MagicMock(create_run_session=created)))
+    monkeypatch.setattr(generators, "_get_status_panel", AsyncMock(return_value=("panel", None)))
+    callback = MagicMock(answer=AsyncMock())
+    callback.message.edit_text = AsyncMock()
+
+    await generators.stop_all_callback(callback, gen_service, session_repo=MagicMock(), redis=MagicMock())
+    assert created.await_args.args[0] == datetime(2026, 10, 18, 11, 0)
+
+    gen_service.get_all.return_value = [SimpleNamespace(status=GenStatus.stopped, current_run_start=None)]
+    created.reset_mock()
+    await generators.stop_all_callback(callback, gen_service, session_repo=MagicMock(), redis=MagicMock())
+    created.assert_not_awaited()

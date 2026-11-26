@@ -5,8 +5,10 @@ from aiogram import F, Router, types
 from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
+from redis.asyncio import Redis
 
 from bot.database.models import GenStatus
+from bot.database.repositories.session import SessionRepository
 from bot.keyboards.inline_kb import (
     STALE_MENU_TEXT,
     GenCb,
@@ -16,8 +18,9 @@ from bot.keyboards.inline_kb import (
 from bot.keyboards.main_kb import MENU_BUTTONS
 from bot.services.generator import GeneratorService
 from bot.services.maintenance import format_status, maintenance_status
+from bot.services.session_service import SessionService
 from bot.states import GenStates
-from bot.utils.clock import now_local
+from bot.utils.clock import now_local, utc_to_local
 
 logger = logging.getLogger(__name__)
 
@@ -198,8 +201,15 @@ async def start_generator_callback(callback: types.CallbackQuery, callback_data:
     await callback.answer(f"✅ {gen_name} запущено!")
 
 @router.callback_query(F.data == "stop_all_gens")
-async def stop_all_callback(callback: types.CallbackQuery, generator_service: GeneratorService):
+async def stop_all_callback(callback: types.CallbackQuery, generator_service: GeneratorService,
+                            session_repo: SessionRepository, redis: Redis):
+    run_starts = [g.current_run_start for g in await generator_service.get_all()
+                  if g.status == GenStatus.running and g.current_run_start]
     report = await generator_service.stop_all(callback.from_user.id)
+    if run_starts:
+        # A manual run burns fuel outside the schedule: ask the shift to check the tank
+        sessions = SessionService(session_repo.session, bot=callback.bot, redis=redis)
+        await sessions.create_run_session(utc_to_local(min(run_starts)), now_local())
 
     text, kb = await _get_status_panel(generator_service, exclude_correction=True)
     await callback.message.edit_text(f"{report}\n\n{text}" if report else text, reply_markup=kb, parse_mode="HTML")
