@@ -11,6 +11,7 @@ from bot.database.repositories.generator import GeneratorRepository
 from bot.database.repositories.inventory import InventoryRepository
 from bot.database.repositories.logs import LogRepository
 from bot.database.repositories.schedule import ScheduleRepository
+from bot.database.repositories.session import SessionRepository
 from bot.database.repositories.user import UserRepository
 from bot.services.generator import GeneratorService
 from bot.services.inventory import InventoryService
@@ -47,6 +48,7 @@ class DbSessionMiddleware(BaseMiddleware):
             data["user_repo"] = user_repo
             data["log_repo"] = log_repo
             data["schedule_repo"] = schedule_repo
+            data["session_repo"] = SessionRepository(session)
             
             # Slack Service
             slack_service = SlackService(config.SLACK_WEBHOOK_URL)

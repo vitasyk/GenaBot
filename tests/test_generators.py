@@ -277,6 +277,29 @@ async def test_refuel_error_is_reraised_for_rollback():
     inventory_service.take_fuel.assert_awaited_once_with(1, 20)
     callback.message.answer.assert_awaited_once()
     callback.message.edit_text.assert_not_awaited()
+    inventory_service.repo.session.commit.assert_not_called()
+
+
+async def test_refuel_is_committed_before_the_message_edit():
+    # Regression: a failed edit_text (Telegram timeout) rolled back a refuel the user believed done
+    state = FSMContext(storage=MemoryStorage(), key=StorageKey(bot_id=1, chat_id=1, user_id=1))
+    await state.set_state(RefuelAccumulatorStates.accumulating)
+    await state.update_data(gen_id=3, accumulated_liters=20)
+    inventory_service = MagicMock(take_fuel=AsyncMock(return_value=100))
+    inventory_service.repo.session.commit = AsyncMock()
+    generator_service = MagicMock(get_active=AsyncMock(return_value=_gen(3, "WILSON")), log_refuel=AsyncMock())
+    generator_service.antigel.advise_for = AsyncMock(return_value=MagicMock(needed=False))
+    callback = MagicMock()
+    callback.from_user.id = 1
+    callback.answer = AsyncMock()
+
+    async def edit_fails(*args, **kwargs):
+        assert inventory_service.repo.session.commit.await_count == 1
+        raise RuntimeError("Bad Gateway")
+    callback.message.edit_text = AsyncMock(side_effect=edit_fails)
+
+    with pytest.raises(RuntimeError, match="Bad Gateway"):
+        await refuel_accumulator_done(callback, state, inventory_service, generator_service)
 
 
 # --- manual run-hours correction --------------------------------------------

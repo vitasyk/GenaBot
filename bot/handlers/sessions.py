@@ -12,6 +12,7 @@ from bot.keyboards.inline_kb import STALE_MENU_TEXT, GenCb, status_icon
 from bot.keyboards.session_kb import (
     get_gen_selection_kb,
     get_in_progress_kb,
+    get_skip_kb,
 )
 from bot.services.generator import GeneratorService
 from bot.services.inventory import LITERS_PER_CAN, InventoryService
@@ -198,7 +199,6 @@ async def process_antigel(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 async def _ask_notes(send, state: FSMContext) -> None:
-    from bot.keyboards.session_kb import get_skip_kb
     await send(
         "📝 <b>Додати нотатки?</b>\n"
         "(наприклад: 'залив масло', 'були проблеми')\n\n"
@@ -209,17 +209,15 @@ async def _ask_notes(send, state: FSMContext) -> None:
     await state.set_state(SessionStates.waiting_for_notes)
 
 @router.callback_query(SessionStates.waiting_for_notes, F.data == "skip_step")
-async def skip_note_callback(callback: CallbackQuery, state: FSMContext, bot: Bot, generator_service: GeneratorService, inventory_service: InventoryService):
-    await finish_session(callback, state, bot, notes=None, generator_service=generator_service, inventory_service=inventory_service)
+async def skip_note_callback(callback: CallbackQuery, state: FSMContext, bot: Bot, session_repo: SessionRepository, generator_service: GeneratorService, inventory_service: InventoryService):
+    await finish_session(callback, state, bot, notes=None, session_repo=session_repo, generator_service=generator_service, inventory_service=inventory_service)
 
 @router.message(SessionStates.waiting_for_notes)
-async def process_notes(message: Message, state: FSMContext, bot: Bot, generator_service: GeneratorService, inventory_service: InventoryService):
-    await finish_session(message, state, bot, notes=message.text, generator_service=generator_service, inventory_service=inventory_service)
+async def process_notes(message: Message, state: FSMContext, bot: Bot, session_repo: SessionRepository, generator_service: GeneratorService, inventory_service: InventoryService):
+    await finish_session(message, state, bot, notes=message.text, session_repo=session_repo, generator_service=generator_service, inventory_service=inventory_service)
 
-async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot: Bot, notes: str | None, generator_service: GeneratorService = None, inventory_service: InventoryService = None):
+async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot: Bot, notes: str | None, session_repo: SessionRepository, generator_service: GeneratorService, inventory_service: InventoryService):
     data = await state.get_data()
-    # Clear first: if the reply fails, the worker must not stay on this step and complete again
-    await state.clear()
     if isinstance(event, CallbackQuery):
         await event.answer()
     reply = event.message.edit_text if isinstance(event, CallbackQuery) else event.answer
@@ -227,6 +225,7 @@ async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot:
     session_id = data.get("session_id")
     gen_fuel_data = data.get("gen_fuel_data") or {}
     if session_id is None or not gen_fuel_data:
+        await state.clear()
         await reply("⚠️ Дані сесії втрачено. Натисніть «✅ Завершити сесію» ще раз.")
         return
 
@@ -236,35 +235,38 @@ async def finish_session(event: Message | CallbackQuery, state: FSMContext, bot:
     total_cans = total_liters / LITERS_PER_CAN
     gen_summary = ", ".join(f"{name}: {liters}л" for name, liters in gen_fuel_data.items())
 
-    # Complete first: only the worker who actually closes the session deducts fuel
-    async with session_maker() as session:
-        completed_session = await SessionRepository(session).complete_session(
-            session_id=session_id,
-            completed_by=user_id,
-            gen_name=gen_summary,
-            liters=total_liters,
-            cans=total_cans,
-            notes=notes
-        )
+    # One transaction (the middleware session): the session is completed only together with its fuel.
+    # The conditional UPDATE lets only the worker who actually closes the session deduct fuel.
+    completed_session = await session_repo.complete_session(
+        session_id=session_id,
+        completed_by=user_id,
+        gen_name=gen_summary,
+        liters=total_liters,
+        cans=total_cans,
+        notes=notes
+    )
     if not completed_session:
+        await state.clear()
         await reply("ℹ️ Цю сесію вже завершено. Паливо повторно не списано.")
         return
 
-    new_stock_cans = None
-    if inventory_service:
-        try:
-            new_stock_cans = await inventory_service.take_fuel(user_id, total_liters) / LITERS_PER_CAN
-        except Exception:
-            logger.exception(f"Failed to deduct fuel for session {session_id}, user_id={user_id}")
-
-    if generator_service:
+    try:
+        new_stock_cans = await inventory_service.take_fuel(user_id, total_liters) / LITERS_PER_CAN
         for name, liters in gen_fuel_data.items():
-            try:
-                await generator_service.log_refuel(user_id, name, liters)
-                if antigel_added:
-                    await generator_service.reset_antigel(user_id, name)
-            except Exception:
-                logger.exception(f"Failed to log refuel for {name}, session {session_id}")
+            await generator_service.log_refuel(user_id, name, liters)
+            if antigel_added:
+                await generator_service.reset_antigel(user_id, name)
+    except Exception:
+        logger.exception("Refuel failed for session %s, user_id=%s", session_id, user_id)
+        await session_repo.session.rollback()
+        # State stays on the notes step: the same button / a new note retries the whole completion
+        await reply("❌ Не вдалося записати заправку, зміни скасовано. Спробуйте ще раз.",
+                    reply_markup=get_skip_kb())
+        return
+
+    # Commit before any Telegram call: a failed reply must not roll the refuel back
+    await session_repo.session.commit()
+    await state.clear()
 
     statuses = await _get_gen_statuses(generator_service)
     gen_list = "\n".join(
